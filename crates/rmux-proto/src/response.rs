@@ -1,0 +1,565 @@
+//! Detached response contracts.
+
+use serde::{Deserialize, Serialize};
+
+use crate::{ControlModeResponse, LayoutName, RmuxError};
+
+#[path = "response/session.rs"]
+mod session;
+pub use session::{
+    HasSessionResponse, KillSessionResponse, ListSessionsResponse, NewSessionResponse,
+    RenameSessionResponse,
+};
+
+#[path = "response/server.rs"]
+mod server;
+pub use server::{
+    KillServerResponse, LockClientResponse, LockServerResponse, LockSessionResponse,
+    ServerAccessResponse,
+};
+
+#[path = "response/target.rs"]
+mod target;
+pub use target::ResolveTargetResponse;
+
+#[path = "response/window.rs"]
+mod window;
+pub use window::{
+    KillWindowResponse, LastWindowResponse, LinkWindowResponse, ListWindowsResponse,
+    MoveWindowResponse, NewWindowResponse, NextWindowResponse, PreviousWindowResponse,
+    RenameWindowResponse, ResizeWindowResponse, RespawnWindowResponse, RotateWindowResponse,
+    SelectWindowResponse, SwapWindowResponse, UnlinkWindowResponse, WindowListEntry,
+};
+
+#[path = "response/pane.rs"]
+mod pane;
+pub use pane::{
+    BreakPaneResponse, DisplayPanesResponse, JoinPaneResponse, KillPaneResponse, LastPaneResponse,
+    ListPanesResponse, MovePaneResponse, PipePaneResponse, ResizePaneResponse, RespawnPaneResponse,
+    SelectPaneResponse, SendKeysResponse, SplitWindowResponse, SwapPaneResponse,
+};
+
+#[path = "response/client.rs"]
+mod client;
+pub use client::{
+    AttachSessionResponse, DetachClientResponse, ListClientsResponse, RefreshClientResponse,
+    SuspendClientResponse, SwitchClientResponse,
+};
+
+#[path = "response/keys.rs"]
+mod keys;
+pub use keys::{
+    BindKeyResponse, ClockModeResponse, CopyModeResponse, ListKeysResponse, SendPrefixResponse,
+    UnbindKeyResponse,
+};
+
+#[path = "response/options.rs"]
+mod options;
+pub use options::{
+    SetEnvironmentResponse, SetHookResponse, SetOptionByNameResponse, SetOptionResponse,
+    ShowEnvironmentResponse, ShowHooksResponse, ShowOptionsResponse,
+};
+
+/// All detached responses supported by the wire protocol.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Response {
+    /// Success payload for `new-session`.
+    NewSession(NewSessionResponse),
+    /// Success payload for `has-session`.
+    HasSession(HasSessionResponse),
+    /// Success payload for `kill-session`.
+    KillSession(KillSessionResponse),
+    /// Success payload for `new-window`.
+    NewWindow(NewWindowResponse),
+    /// Success payload for `kill-window`.
+    KillWindow(KillWindowResponse),
+    /// Success payload for `select-window`.
+    SelectWindow(SelectWindowResponse),
+    /// Success payload for `rename-window`.
+    RenameWindow(RenameWindowResponse),
+    /// Success payload for `next-window`.
+    NextWindow(NextWindowResponse),
+    /// Success payload for `previous-window`.
+    PreviousWindow(PreviousWindowResponse),
+    /// Success payload for `last-window`.
+    LastWindow(LastWindowResponse),
+    /// Success payload for `list-windows`.
+    ListWindows(ListWindowsResponse),
+    /// Success payload for `move-window`.
+    MoveWindow(MoveWindowResponse),
+    /// Success payload for `swap-window`.
+    SwapWindow(SwapWindowResponse),
+    /// Success payload for `rotate-window`.
+    RotateWindow(RotateWindowResponse),
+    /// Success payload for `split-window`.
+    SplitWindow(SplitWindowResponse),
+    /// Success payload for `swap-pane`.
+    SwapPane(SwapPaneResponse),
+    /// Success payload for `last-pane`.
+    LastPane(LastPaneResponse),
+    /// Success payload for `join-pane`.
+    JoinPane(JoinPaneResponse),
+    /// Success payload for `break-pane`.
+    BreakPane(BreakPaneResponse),
+    /// Success payload for `kill-pane`.
+    KillPane(KillPaneResponse),
+    /// Success payload for `select-layout`.
+    SelectLayout(SelectLayoutResponse),
+    /// Success payload for `resize-pane`.
+    ResizePane(ResizePaneResponse),
+    /// Success payload for `display-panes`.
+    DisplayPanes(DisplayPanesResponse),
+    /// Success payload for `select-pane`.
+    SelectPane(SelectPaneResponse),
+    /// Success payload for `send-keys`.
+    SendKeys(SendKeysResponse),
+    /// Success payload for `attach-session`.
+    AttachSession(AttachSessionResponse),
+    /// Success payload for `switch-client`.
+    SwitchClient(SwitchClientResponse),
+    /// Success payload for `detach-client`.
+    DetachClient(DetachClientResponse),
+    /// Success payload for `set-option`.
+    SetOption(SetOptionResponse),
+    /// Success payload for `set-environment`.
+    SetEnvironment(SetEnvironmentResponse),
+    /// Success payload for `set-hook`.
+    SetHook(SetHookResponse),
+    /// Error payload surfaced as exit code `1` and stderr by clients.
+    Error(ErrorResponse),
+    /// Success payload for `next-layout`.
+    NextLayout(NextLayoutResponse),
+    /// Success payload for `previous-layout`.
+    PreviousLayout(PreviousLayoutResponse),
+    /// Success payload for `show-options`.
+    ShowOptions(ShowOptionsResponse),
+    /// Success payload for `show-environment`.
+    ShowEnvironment(ShowEnvironmentResponse),
+    /// Success payload for `set-buffer`.
+    SetBuffer(SetBufferResponse),
+    /// Success payload for `show-buffer`.
+    ShowBuffer(ShowBufferResponse),
+    /// Success payload for `paste-buffer`.
+    PasteBuffer(PasteBufferResponse),
+    /// Success payload for `list-buffers`.
+    ListBuffers(ListBuffersResponse),
+    /// Success payload for `delete-buffer`.
+    DeleteBuffer(DeleteBufferResponse),
+    /// Success payload for `load-buffer`.
+    LoadBuffer(LoadBufferResponse),
+    /// Success payload for `save-buffer`.
+    SaveBuffer(SaveBufferResponse),
+    /// Success payload for `capture-pane`.
+    CapturePane(CapturePaneResponse),
+    /// Success payload for `display-message`.
+    DisplayMessage(DisplayMessageResponse),
+    /// Success payload for `run-shell`.
+    RunShell(RunShellResponse),
+    /// Success payload for `if-shell`.
+    IfShell(IfShellResponse),
+    /// Success payload for `wait-for`.
+    WaitFor(WaitForResponse),
+    /// Success payload for `rename-session`.
+    RenameSession(RenameSessionResponse),
+    /// Success payload for `list-sessions`.
+    ListSessions(ListSessionsResponse),
+    /// Success payload for `list-panes`.
+    ListPanes(ListPanesResponse),
+    /// Success payload for `source-file`.
+    SourceFile(SourceFileResponse),
+    /// Success payload for string-based `set-option`.
+    SetOptionByName(SetOptionByNameResponse),
+    /// Success payload for `show-hooks`.
+    ShowHooks(ShowHooksResponse),
+    /// Success payload for `bind-key`.
+    BindKey(BindKeyResponse),
+    /// Success payload for `unbind-key`.
+    UnbindKey(UnbindKeyResponse),
+    /// Success payload for `list-keys`.
+    ListKeys(ListKeysResponse),
+    /// Success payload for `send-prefix`.
+    SendPrefix(SendPrefixResponse),
+    /// Success payload for `clear-history`.
+    ClearHistory(ClearHistoryResponse),
+    /// Success payload for `copy-mode`.
+    CopyMode(CopyModeResponse),
+    /// Success payload for detached control-mode upgrade.
+    ControlMode(ControlModeResponse),
+    /// Success payload for `clock-mode`.
+    ClockMode(ClockModeResponse),
+    /// Success payload for `show-messages`.
+    ShowMessages(ShowMessagesResponse),
+    /// Success payload for `kill-server`.
+    KillServer(KillServerResponse),
+    /// Success payload for `lock-server`.
+    LockServer(LockServerResponse),
+    /// Success payload for `lock-session`.
+    LockSession(LockSessionResponse),
+    /// Success payload for `lock-client`.
+    LockClient(LockClientResponse),
+    /// Success payload for `server-access`.
+    ServerAccess(ServerAccessResponse),
+    /// Success payload for `refresh-client`.
+    RefreshClient(RefreshClientResponse),
+    /// Success payload for `list-clients`.
+    ListClients(ListClientsResponse),
+    /// Success payload for `suspend-client`.
+    SuspendClient(SuspendClientResponse),
+    /// Success payload for `resize-window`.
+    ResizeWindow(ResizeWindowResponse),
+    /// Success payload for `respawn-window`.
+    RespawnWindow(RespawnWindowResponse),
+    /// Success payload for `move-pane`.
+    MovePane(MovePaneResponse),
+    /// Success payload for `pipe-pane`.
+    PipePane(PipePaneResponse),
+    /// Success payload for `respawn-pane`.
+    RespawnPane(RespawnPaneResponse),
+    /// Success payload for `link-window`.
+    LinkWindow(LinkWindowResponse),
+    /// Success payload for `unlink-window`.
+    UnlinkWindow(UnlinkWindowResponse),
+    /// Success payload for internal detached target resolution.
+    ResolveTarget(ResolveTargetResponse),
+}
+
+impl Response {
+    /// Returns `true` when this response carries an error payload.
+    #[must_use]
+    pub const fn is_error(&self) -> bool {
+        matches!(self, Self::Error(_))
+    }
+
+    /// Returns the shared stdout contract when this response carries printable output.
+    #[must_use]
+    pub fn command_output(&self) -> Option<&CommandOutput> {
+        match self {
+            Self::NewSession(response) => response.command_output(),
+            Self::ListWindows(response) => Some(response.command_output()),
+            Self::ShowOptions(response) => Some(response.command_output()),
+            Self::ShowEnvironment(response) => Some(response.command_output()),
+            Self::ShowHooks(response) => Some(response.command_output()),
+            Self::ShowBuffer(response) => Some(response.command_output()),
+            Self::ListBuffers(response) => Some(response.command_output()),
+            Self::CapturePane(response) => response.command_output(),
+            Self::DisplayMessage(response) => response.command_output(),
+            Self::ResolveTarget(_) => None,
+            Self::RunShell(response) => response.command_output(),
+            Self::IfShell(response) => response.command_output(),
+            Self::ListSessions(response) => Some(response.command_output()),
+            Self::ListPanes(response) => Some(response.command_output()),
+            Self::SourceFile(response) => response.command_output(),
+            Self::SetOptionByName(_) => None,
+            Self::ListKeys(response) => Some(response.command_output()),
+            Self::ControlMode(_) => None,
+            Self::ClockMode(_) => None,
+            Self::ShowMessages(response) => Some(response.command_output()),
+            Self::ServerAccess(response) => Some(response.command_output()),
+            Self::ListClients(response) => Some(response.command_output()),
+            Self::BreakPane(response) => response.command_output(),
+            _ => None,
+        }
+    }
+}
+
+/// Reusable stdout payload for commands that produce printable output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandOutput {
+    /// The exact bytes the client should write to stdout.
+    pub stdout: Vec<u8>,
+}
+
+impl CommandOutput {
+    /// Creates a stdout payload from raw bytes.
+    #[must_use]
+    pub fn from_stdout(stdout: impl Into<Vec<u8>>) -> Self {
+        Self {
+            stdout: stdout.into(),
+        }
+    }
+
+    /// Returns the raw stdout bytes.
+    #[must_use]
+    pub fn stdout(&self) -> &[u8] {
+        &self.stdout
+    }
+}
+
+/// Response payload for `select-layout`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectLayoutResponse {
+    /// The applied layout.
+    pub layout: LayoutName,
+}
+
+/// Response payload for `next-layout`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NextLayoutResponse {
+    /// The applied layout.
+    pub layout: LayoutName,
+}
+
+/// Response payload for `previous-layout`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviousLayoutResponse {
+    /// The applied layout.
+    pub layout: LayoutName,
+}
+
+/// Response payload for `set-buffer`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetBufferResponse {
+    /// The name of the created or replaced buffer.
+    pub buffer_name: String,
+}
+
+/// Response payload for `show-buffer`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShowBufferResponse {
+    /// The pre-rendered stdout bytes for the CLI.
+    pub output: CommandOutput,
+}
+
+impl ShowBufferResponse {
+    /// Returns the reusable stdout payload.
+    #[must_use]
+    pub fn command_output(&self) -> &CommandOutput {
+        &self.output
+    }
+}
+
+/// Response payload for `paste-buffer`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PasteBufferResponse {
+    /// The buffer name that was pasted.
+    pub buffer_name: String,
+}
+
+/// Response payload for `list-buffers`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListBuffersResponse {
+    /// The pre-rendered stdout bytes for the CLI.
+    pub output: CommandOutput,
+}
+
+impl ListBuffersResponse {
+    /// Returns the reusable stdout payload.
+    #[must_use]
+    pub fn command_output(&self) -> &CommandOutput {
+        &self.output
+    }
+}
+
+/// Response payload for `delete-buffer`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteBufferResponse {
+    /// The name of the deleted buffer.
+    pub buffer_name: String,
+}
+
+/// Response payload for `load-buffer`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoadBufferResponse {
+    /// The name of the created or replaced buffer.
+    pub buffer_name: String,
+}
+
+/// Response payload for `save-buffer`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SaveBufferResponse {
+    /// The name of the saved buffer.
+    pub buffer_name: String,
+}
+
+/// Response payload for `capture-pane`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapturePaneResponse {
+    /// The created/replaced buffer name for non-printing captures.
+    pub buffer_name: Option<String>,
+    /// Captured stdout for `capture-pane -p`.
+    pub output: Option<CommandOutput>,
+}
+
+impl CapturePaneResponse {
+    /// Builds a non-printing capture response.
+    #[must_use]
+    pub fn from_buffer(buffer_name: String) -> Self {
+        Self {
+            buffer_name: Some(buffer_name),
+            output: None,
+        }
+    }
+
+    /// Builds a printing capture response.
+    #[must_use]
+    pub fn from_output(output: CommandOutput) -> Self {
+        Self {
+            buffer_name: None,
+            output: Some(output),
+        }
+    }
+
+    /// Returns the reusable stdout payload when this was a printing capture.
+    #[must_use]
+    pub fn command_output(&self) -> Option<&CommandOutput> {
+        self.output.as_ref()
+    }
+}
+
+/// Response payload for `clear-history`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClearHistoryResponse;
+
+/// Response payload for `show-messages`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShowMessagesResponse {
+    /// Expanded stdout for `show-messages`.
+    pub output: CommandOutput,
+}
+
+impl ShowMessagesResponse {
+    /// Builds a response from reusable command output bytes.
+    #[must_use]
+    pub const fn from_output(output: CommandOutput) -> Self {
+        Self { output }
+    }
+
+    /// Returns the stdout payload for `show-messages`.
+    #[must_use]
+    pub const fn command_output(&self) -> &CommandOutput {
+        &self.output
+    }
+}
+
+/// Response payload for `display-message`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisplayMessageResponse {
+    /// Expanded stdout for `display-message -p`.
+    pub output: Option<CommandOutput>,
+}
+
+impl DisplayMessageResponse {
+    /// Builds a non-printing display response.
+    #[must_use]
+    pub const fn no_output() -> Self {
+        Self { output: None }
+    }
+
+    /// Builds a printing display response.
+    #[must_use]
+    pub fn from_output(output: CommandOutput) -> Self {
+        Self {
+            output: Some(output),
+        }
+    }
+
+    /// Returns the reusable stdout payload when this was a printing display.
+    #[must_use]
+    pub fn command_output(&self) -> Option<&CommandOutput> {
+        self.output.as_ref()
+    }
+}
+
+/// Response payload for `run-shell`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunShellResponse {
+    /// Captured stdout for foreground `run-shell`.
+    pub output: Option<CommandOutput>,
+}
+
+impl RunShellResponse {
+    /// Builds a background `run-shell` response.
+    #[must_use]
+    pub const fn background() -> Self {
+        Self { output: None }
+    }
+
+    /// Builds a response with no command output.
+    #[must_use]
+    pub const fn no_output() -> Self {
+        Self::background()
+    }
+
+    /// Builds a foreground `run-shell` response.
+    #[must_use]
+    pub fn from_output(output: CommandOutput) -> Self {
+        Self {
+            output: Some(output),
+        }
+    }
+
+    /// Returns the reusable stdout payload for foreground `run-shell`.
+    #[must_use]
+    pub fn command_output(&self) -> Option<&CommandOutput> {
+        self.output.as_ref()
+    }
+}
+
+/// Response payload for `if-shell`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IfShellResponse {
+    /// Captured stdout from the selected nested command when it produced output.
+    pub output: Option<CommandOutput>,
+}
+
+impl IfShellResponse {
+    /// Builds a response with no nested command output.
+    #[must_use]
+    pub const fn no_output() -> Self {
+        Self { output: None }
+    }
+
+    /// Builds a response with nested command output.
+    #[must_use]
+    pub fn from_output(output: CommandOutput) -> Self {
+        Self {
+            output: Some(output),
+        }
+    }
+
+    /// Returns the reusable stdout payload when the selected nested command printed output.
+    #[must_use]
+    pub fn command_output(&self) -> Option<&CommandOutput> {
+        self.output.as_ref()
+    }
+}
+
+/// Response payload for `source-file`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceFileResponse {
+    /// Verbose parsed-command output, when requested.
+    pub output: Option<CommandOutput>,
+}
+
+impl SourceFileResponse {
+    /// Builds a response without command output.
+    #[must_use]
+    pub const fn no_output() -> Self {
+        Self { output: None }
+    }
+
+    /// Builds a response with command output.
+    #[must_use]
+    pub fn from_output(output: CommandOutput) -> Self {
+        Self {
+            output: Some(output),
+        }
+    }
+
+    /// Returns the reusable stdout payload when `source-file -v` printed output.
+    #[must_use]
+    pub fn command_output(&self) -> Option<&CommandOutput> {
+        self.output.as_ref()
+    }
+}
+
+/// Response payload for `wait-for`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WaitForResponse;
+
+/// Error response payload for detached RPC failures.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ErrorResponse {
+    /// The shared wire-safe error value.
+    pub error: RmuxError,
+}

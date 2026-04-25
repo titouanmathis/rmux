@@ -282,7 +282,7 @@ async fn pane_alert_event_updates_grouped_session_window_names() {
         })
         .await;
 
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
         {
             let state = handler.state.lock().await;

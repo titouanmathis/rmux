@@ -50,7 +50,9 @@ async fn start_cat_capture(
         response,
         Response::SendKeys(SendKeysResponse { key_count: 2 })
     );
-    sleep(Duration::from_millis(100)).await;
+    wait_for_file_to_exist(path)
+        .await
+        .expect("cat capture file should be created by shell redirection");
 }
 
 async fn finish_cat_capture(handler: &RequestHandler, session_name: &rmux_proto::SessionName) {
@@ -84,6 +86,20 @@ async fn wait_for_file_bytes(path: &Path, expected: &[u8]) -> Result<(), io::Err
 
     Err(io::Error::other(format!(
         "file '{}' never reached expected contents",
+        path.display()
+    )))
+}
+
+async fn wait_for_file_to_exist(path: &Path) -> Result<(), io::Error> {
+    for _ in 0..100 {
+        if path.exists() {
+            return Ok(());
+        }
+        sleep(Duration::from_millis(20)).await;
+    }
+
+    Err(io::Error::other(format!(
+        "file '{}' was not created",
         path.display()
     )))
 }

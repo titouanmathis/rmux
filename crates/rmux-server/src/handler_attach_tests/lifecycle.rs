@@ -19,25 +19,7 @@ async fn attached_remain_on_exit_strips_the_submitted_exit_line_from_dead_pane_c
             .await,
         Response::SetOption(_)
     ));
-    assert!(matches!(
-        handler
-            .handle(Request::SendKeys(SendKeysRequest {
-                target: target.clone(),
-                keys: vec!["export PS1='PROMPT> '".to_owned(), "Enter".to_owned()],
-            }))
-            .await,
-        Response::SendKeys(_)
-    ));
-    assert!(matches!(
-        handler
-            .handle(Request::SendKeys(SendKeysRequest {
-                target: target.clone(),
-                keys: vec!["clear".to_owned(), "Enter".to_owned()],
-            }))
-            .await,
-        Response::SendKeys(_)
-    ));
-    sleep(Duration::from_millis(150)).await;
+    prepare_attached_shell_prompt(&handler, &target).await;
 
     handler
         .handle_attached_live_input_for_test(requester_pid, b"exit\r")
@@ -106,25 +88,7 @@ async fn attached_exit_on_last_pane_closes_the_session_and_client() {
     let mut control_rx = create_attached_session(&handler, requester_pid, &alpha).await;
     let target = PaneTarget::new(alpha.clone(), 0);
 
-    assert!(matches!(
-        handler
-            .handle(Request::SendKeys(SendKeysRequest {
-                target: target.clone(),
-                keys: vec!["export PS1='PROMPT> '".to_owned(), "Enter".to_owned()],
-            }))
-            .await,
-        Response::SendKeys(_)
-    ));
-    assert!(matches!(
-        handler
-            .handle(Request::SendKeys(SendKeysRequest {
-                target,
-                keys: vec!["clear".to_owned(), "Enter".to_owned()],
-            }))
-            .await,
-        Response::SendKeys(_)
-    ));
-    sleep(Duration::from_millis(150)).await;
+    prepare_attached_shell_prompt(&handler, &target).await;
     drain_attach_controls(&mut control_rx);
 
     handler
@@ -305,25 +269,7 @@ async fn attached_live_input_preserves_split_utf8_sequences() {
     let alpha = session_name("alpha");
     let _control_rx = create_attached_session(&handler, requester_pid, &alpha).await;
     let target = PaneTarget::new(alpha.clone(), 0);
-    assert!(matches!(
-        handler
-            .handle(Request::SendKeys(SendKeysRequest {
-                target: target.clone(),
-                keys: vec!["export PS1='PROMPT> '".to_owned(), "Enter".to_owned()],
-            }))
-            .await,
-        Response::SendKeys(_)
-    ));
-    assert!(matches!(
-        handler
-            .handle(Request::SendKeys(SendKeysRequest {
-                target: target.clone(),
-                keys: vec!["clear".to_owned(), "Enter".to_owned()],
-            }))
-            .await,
-        Response::SendKeys(_)
-    ));
-    sleep(Duration::from_millis(100)).await;
+    prepare_attached_shell_prompt(&handler, &target).await;
 
     let mut pending_input = Vec::new();
     handler

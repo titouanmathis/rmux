@@ -265,6 +265,34 @@ async fn wait_for_capture_containing(
     }
 }
 
+async fn prepare_attached_shell_prompt(handler: &RequestHandler, target: &PaneTarget) {
+    assert!(matches!(
+        handler
+            .handle(Request::SendKeys(SendKeysRequest {
+                target: target.clone(),
+                keys: vec!["export PS1='PROMPT> '".to_owned(), "Enter".to_owned()],
+            }))
+            .await,
+        Response::SendKeys(_)
+    ));
+    assert!(matches!(
+        handler
+            .handle(Request::SendKeys(SendKeysRequest {
+                target: target.clone(),
+                keys: vec!["clear".to_owned(), "Enter".to_owned()],
+            }))
+            .await,
+        Response::SendKeys(_)
+    ));
+    wait_for_capture_containing(
+        handler,
+        target.clone(),
+        "PROMPT>",
+        "attached shell prompt must be ready",
+    )
+    .await;
+}
+
 async fn wait_for_dead_pane(
     handler: &RequestHandler,
     session_name: &SessionName,

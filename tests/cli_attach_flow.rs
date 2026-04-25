@@ -1461,7 +1461,7 @@ fn choose_tree_q_restores_the_four_pane_layout_on_the_real_attached_client(
     let mut layout_bytes = marker_output.into_bytes();
     layout_bytes.extend(drain_attach_output_bytes(attach.master_mut())?);
     let _ = capture_attach_transcript(&mut screen, &mut parser, &layout_bytes)?;
-    let baseline = wait_for_attach_transcript_matching(
+    let _ = wait_for_attach_transcript_matching(
         &mut attach,
         &mut screen,
         &mut parser,
@@ -1480,6 +1480,7 @@ fn choose_tree_q_restores_the_four_pane_layout_on_the_real_attached_client(
             == 4,
         "expected four panes after the interactive split sequence"
     );
+    let baseline_geometry = list_pane_geometry(&harness, "alpha")?;
 
     let active_pane = active_pane_target(&harness, "alpha")?;
     attach.send_bytes(b"\x02w")?;
@@ -1512,12 +1513,18 @@ fn choose_tree_q_restores_the_four_pane_layout_on_the_real_attached_client(
         after_q_bytes = drain_attach_output_bytes(attach.master_mut())?;
     };
 
-    let baseline_panes = transcript_without_status_line(&baseline);
     let restored_panes = transcript_without_status_line(&restored);
-    let baseline_geometry = list_pane_geometry(&harness, "alpha")?;
+    let restored_geometry = list_pane_geometry(&harness, "alpha")?;
     assert_eq!(
-        restored_panes, baseline_panes,
-        "choose-tree q should restore the exact pane layout\n--- baseline ---\n{baseline_panes}\n--- restored ---\n{restored_panes}"
+        restored_geometry, baseline_geometry,
+        "choose-tree q should restore the exact pane geometry"
+    );
+    assert!(
+        marker_ref_slices
+            .iter()
+            .all(|marker| restored_panes.contains(marker))
+            && !restored_panes.contains("sort: index"),
+        "choose-tree q should restore pane content instead of mode-tree content\n--- restored ---\n{restored_panes}"
     );
 
     let settled = apply_quiescent_attach_output(

@@ -244,6 +244,27 @@ async fn capture_pane_print(handler: &RequestHandler, target: PaneTarget) -> Str
     String::from_utf8(output.stdout().to_vec()).expect("capture-pane stdout is utf-8")
 }
 
+async fn wait_for_capture_containing(
+    handler: &RequestHandler,
+    target: PaneTarget,
+    needle: &str,
+    context: &str,
+) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let capture = capture_pane_print(handler, target.clone()).await;
+        if capture.contains(needle) {
+            return capture;
+        }
+
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{context}, got {capture:?}"
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
+}
+
 async fn wait_for_dead_pane(
     handler: &RequestHandler,
     session_name: &SessionName,

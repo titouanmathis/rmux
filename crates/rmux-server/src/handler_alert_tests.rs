@@ -318,6 +318,11 @@ async fn shell_input_updates_window_name_and_foreground_process_formats() {
     let handler = RequestHandler::new();
     let session = create_session(&handler, "alerts-foreground").await;
     let target = PaneTarget::with_window(session.clone(), 0, 0);
+    let expected_path = std::fs::canonicalize("/tmp")
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
+        .to_string_lossy()
+        .into_owned();
+    let expected = format!("sleep|{expected_path}|sleep");
 
     let response = handler
         .handle(Request::SendKeys(SendKeysRequest {
@@ -335,7 +340,7 @@ async fn shell_input_updates_window_name_and_foreground_process_formats() {
             "#{window_name}|#{pane_current_path}|#{pane_current_command}",
         )
         .await;
-        if rendered == "sleep|/tmp|sleep" {
+        if rendered == expected {
             break;
         }
 

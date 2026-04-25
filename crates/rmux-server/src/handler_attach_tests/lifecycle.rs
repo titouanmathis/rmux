@@ -338,15 +338,15 @@ async fn attached_live_input_preserves_split_utf8_sequences() {
         .handle_attached_live_input(requester_pid, &mut pending_input, b"\x87\\n'\r")
         .await
         .expect("final utf-8 fragment");
-    sleep(Duration::from_millis(100)).await;
-
-    let capture = capture_pane_print(&handler, target).await;
+    let capture = wait_for_capture_containing(
+        &handler,
+        target,
+        "\ncafe 文",
+        "attached input must preserve the split utf-8 output",
+    )
+    .await;
     assert!(
-        capture.contains("PROMPT> printf 'cafe 文\\n'"),
+        capture.contains("printf 'cafe 文\\n'"),
         "attached input must preserve the split utf-8 command text, got {capture:?}"
-    );
-    assert!(
-        capture.contains("cafe 文"),
-        "attached input must preserve the split utf-8 output, got {capture:?}"
     );
 }

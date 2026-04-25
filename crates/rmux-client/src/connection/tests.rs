@@ -136,8 +136,9 @@ fn default_socket_path_matches_server_path_when_rmux_tmpdir_is_unresolved() {
     let server_path = rmux_server::default_socket_path().expect("server socket path");
 
     assert_eq!(client_path, server_path);
+    let fallback_root = fs::canonicalize("/tmp").expect("canonical fallback socket root");
     assert!(
-        client_path.starts_with("/tmp"),
+        client_path.starts_with(&fallback_root),
         "unresolved RMUX_TMPDIR must fall back to /tmp, got {}",
         client_path.display()
     );

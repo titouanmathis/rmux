@@ -240,9 +240,7 @@ pub(crate) fn wait_for_no_child_processes(
 }
 
 pub(crate) fn child_process_states(parent_pid: u32) -> Result<Vec<String>, Box<dyn Error>> {
-    let output = Command::new("ps")
-        .args(["-o", "stat=", "--ppid", &parent_pid.to_string()])
-        .output()?;
+    let output = Command::new("ps").args(["-axo", "ppid=,stat="]).output()?;
 
     if !output.status.success() {
         if output.stdout.is_empty() && output.stderr.is_empty() {
@@ -255,12 +253,22 @@ pub(crate) fn child_process_states(parent_pid: u32) -> Result<Vec<String>, Box<d
         .into());
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout)
+    Ok(parse_child_process_states(
+        parent_pid,
+        &String::from_utf8_lossy(&output.stdout),
+    ))
+}
+
+fn parse_child_process_states(parent_pid: u32, ps_output: &str) -> Vec<String> {
+    ps_output
         .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(ToOwned::to_owned)
-        .collect())
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let ppid = fields.next()?.parse::<u32>().ok()?;
+            let state = fields.next()?;
+            (ppid == parent_pid).then(|| state.to_owned())
+        })
+        .collect()
 }
 
 pub(crate) fn assert_only_default_socket(socket_path: &Path) -> Result<(), Box<dyn Error>> {

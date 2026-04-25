@@ -647,7 +647,8 @@ fn new_session_start_directory_sets_initial_pane_path() -> Result<(), Box<dyn Er
         stderr(&cwd)
     );
     assert!(stderr(&cwd).is_empty());
-    assert_eq!(stdout(&cwd).trim(), start_dir_text);
+    let expected_start_dir = fs::canonicalize(&start_dir)?.to_string_lossy().to_string();
+    assert_eq!(stdout(&cwd).trim(), expected_start_dir);
     Ok(())
 }
 
@@ -731,8 +732,7 @@ fn rmux_environment_default_socket_is_used_when_no_socket_flag_is_given(
     let harness = CliHarness::new("rmux-env-default-socket")?;
     let _daemon = harness.start_hidden_daemon()?;
     assert_success(&harness.run(&["new-session", "-d", "-s", "alpha"])?);
-    let rmux_socket = harness.tmpdir().join("rmux-1000").join("default");
-    let rmux_env = format!("{},1,0", rmux_socket.display());
+    let rmux_env = format!("{},1,0", harness.socket_path().display());
 
     let output = harness.run_with(&["has-session", "-t", "alpha"], |command| {
         command.env("RMUX", &rmux_env);

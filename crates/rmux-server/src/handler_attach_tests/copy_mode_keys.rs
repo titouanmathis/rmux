@@ -16,7 +16,13 @@ async fn attached_copy_mode_emacs_slash_is_unbound_and_not_forwarded() {
             .await,
         Response::SendKeys(_)
     ));
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    wait_for_capture_containing(
+        &handler,
+        target.clone(),
+        "P0-LINE-12",
+        "copy-mode slash test marker must be visible before entering copy-mode",
+    )
+    .await;
     assert!(matches!(
         handler
             .handle(Request::CopyMode(CopyModeRequest {
@@ -73,7 +79,13 @@ async fn attached_copy_mode_emacs_ctrl_s_opens_search_prompt() {
             .await,
         Response::SendKeys(_)
     ));
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    wait_for_capture_containing(
+        &handler,
+        target.clone(),
+        "P0-LINE-12",
+        "copy-mode ctrl-s test marker must be visible before entering copy-mode",
+    )
+    .await;
     assert!(matches!(
         handler
             .handle(Request::CopyMode(CopyModeRequest {
@@ -119,7 +131,13 @@ async fn attached_copy_mode_gets_first_refusal_for_search_and_selection_keys() {
             .await,
         Response::SendKeys(_)
     ));
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    wait_for_capture_containing(
+        &handler,
+        target.clone(),
+        "P0-LINE-12",
+        "copy-mode vi test marker must be visible before entering copy-mode",
+    )
+    .await;
 
     assert!(matches!(
         handler
@@ -181,7 +199,13 @@ async fn attached_copy_mode_q_exits_and_refreshes_normal_surface() {
             .await,
         Response::SendKeys(_)
     ));
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    wait_for_capture_containing(
+        &handler,
+        target.clone(),
+        "P0-LINE-12",
+        "copy-mode q test marker must be visible before entering copy-mode",
+    )
+    .await;
     assert!(matches!(
         handler
             .handle(Request::SetOption(SetOptionRequest {

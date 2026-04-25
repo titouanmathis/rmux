@@ -3,6 +3,9 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Read, Write};
+use std::os::fd::AsFd;
+#[cfg(not(target_os = "linux"))]
+use std::os::fd::AsRawFd;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -409,9 +412,10 @@ fn connect_stream_with_timeout(socket_path: &Path, timeout: Duration) -> io::Res
     let socket = socket_with(
         AddressFamily::UNIX,
         SocketType::STREAM,
-        SocketFlags::CLOEXEC | SocketFlags::NONBLOCK,
+        socket_creation_flags(),
         None,
     )?;
+    configure_socket_for_connect(&socket)?;
 
     match socket_connect(&socket, &address) {
         Ok(()) => {}
@@ -428,7 +432,7 @@ fn connect_stream_with_timeout(socket_path: &Path, timeout: Duration) -> io::Res
 
 fn wait_for_socket_connect<Fd>(socket: &Fd, socket_path: &Path, timeout: Duration) -> io::Result<()>
 where
-    Fd: std::os::fd::AsFd,
+    Fd: AsFd,
 {
     wait_for_connect_completion(
         socket_path,
@@ -458,6 +462,68 @@ where
             Err(error) => Err(error.into()),
         },
     )
+}
+
+#[cfg(target_os = "linux")]
+fn socket_creation_flags() -> SocketFlags {
+    SocketFlags::CLOEXEC | SocketFlags::NONBLOCK
+}
+
+#[cfg(not(target_os = "linux"))]
+fn socket_creation_flags() -> SocketFlags {
+    SocketFlags::empty()
+}
+
+#[cfg(target_os = "linux")]
+fn configure_socket_for_connect<Fd>(_socket: &Fd) -> io::Result<()>
+where
+    Fd: AsFd,
+{
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn configure_socket_for_connect<Fd>(socket: &Fd) -> io::Result<()>
+where
+    Fd: AsFd,
+{
+    let raw_fd = socket.as_fd().as_raw_fd();
+    set_fd_flag(raw_fd, libc::FD_CLOEXEC)?;
+    set_status_flag(raw_fd, libc::O_NONBLOCK)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn set_fd_flag(raw_fd: libc::c_int, flag: libc::c_int) -> io::Result<()> {
+    // SAFETY: `fcntl` reads descriptor flags from a valid socket fd.
+    let flags = unsafe { libc::fcntl(raw_fd, libc::F_GETFD) };
+    if flags == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    // SAFETY: `fcntl` updates only descriptor flags for the same valid fd.
+    let result = unsafe { libc::fcntl(raw_fd, libc::F_SETFD, flags | flag) };
+    if result == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn set_status_flag(raw_fd: libc::c_int, flag: libc::c_int) -> io::Result<()> {
+    // SAFETY: `fcntl` reads file status flags from a valid socket fd.
+    let flags = unsafe { libc::fcntl(raw_fd, libc::F_GETFL) };
+    if flags == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    // SAFETY: `fcntl` updates only file status flags for the same valid fd.
+    let result = unsafe { libc::fcntl(raw_fd, libc::F_SETFL, flags | flag) };
+    if result == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(())
 }
 
 fn connect_timeout_error(socket_path: &Path, timeout: Duration) -> io::Error {

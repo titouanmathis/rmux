@@ -64,6 +64,13 @@ pub struct BlockingLocalStream {
     runtime: tokio::runtime::Runtime,
 }
 
+#[cfg(windows)]
+impl std::fmt::Debug for BlockingLocalStream {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("BlockingLocalStream(named pipe)")
+    }
+}
+
 #[cfg(unix)]
 impl PeerIdentity {
     pub(crate) fn from_unix_stream(stream: &LocalStream) -> io::Result<Self> {

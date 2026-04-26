@@ -8,10 +8,18 @@
 //! through the `$RMUX` environment variable and raw-terminal lifecycle
 //! management for attach-mode clients.
 
+#[cfg(unix)]
+pub mod attach;
+#[cfg(windows)]
+#[path = "attach_unsupported.rs"]
 pub mod attach;
 pub mod auto_start;
 pub(crate) mod commands;
 pub mod connection;
+#[cfg(unix)]
+pub mod control;
+#[cfg(windows)]
+#[path = "control_unsupported.rs"]
 pub mod control;
 pub mod nested;
 

@@ -6,14 +6,13 @@ use std::ffi::OsString;
 #[cfg(test)]
 use std::fs;
 use std::io::{self, Read, Write};
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::ClientError;
-use rmux_ipc::{connect_blocking, LocalEndpoint};
+use rmux_ipc::{connect_blocking, BlockingLocalStream, LocalEndpoint};
 use rmux_proto::{
     decode_frame, encode_frame, AttachSessionResponse, ControlMode, ControlModeResponse,
     FrameDecoder, Request, Response, RmuxError, DEFAULT_MAX_FRAME_LENGTH,
@@ -91,7 +90,7 @@ pub fn connect(socket_path: &Path) -> Result<Connection, ClientError> {
 /// A blocking connection to the RMUX server that exchanges typed frames.
 #[derive(Debug)]
 pub struct Connection {
-    stream: UnixStream,
+    stream: BlockingLocalStream,
     decoder: FrameDecoder,
 }
 
@@ -117,14 +116,14 @@ pub enum ControlTransition {
 #[derive(Debug)]
 pub struct AttachSessionUpgrade {
     response: AttachSessionResponse,
-    stream: UnixStream,
+    stream: BlockingLocalStream,
 }
 
 /// A detached connection that has transitioned into control-mode streaming.
 #[derive(Debug)]
 pub struct ControlModeUpgrade {
     pub(crate) response: ControlModeResponse,
-    pub(crate) stream: UnixStream,
+    pub(crate) stream: BlockingLocalStream,
 }
 
 impl AttachSessionUpgrade {
@@ -136,7 +135,7 @@ impl AttachSessionUpgrade {
 
     /// Consumes the upgrade and returns the raw attach-stream socket.
     #[must_use]
-    pub fn into_stream(self) -> UnixStream {
+    pub fn into_stream(self) -> BlockingLocalStream {
         self.stream
     }
 }
@@ -156,19 +155,15 @@ impl ControlModeUpgrade {
 
     /// Consumes the upgrade and returns the raw control-mode socket.
     #[must_use]
-    pub fn into_stream(self) -> UnixStream {
+    pub fn into_stream(self) -> BlockingLocalStream {
         self.stream
     }
 }
 
 impl Connection {
-    pub(crate) fn new(stream: UnixStream) -> Result<Self, ClientError> {
-        stream
-            .set_read_timeout(Some(SOCKET_IO_TIMEOUT))
-            .map_err(ClientError::Io)?;
-        stream
-            .set_write_timeout(Some(SOCKET_IO_TIMEOUT))
-            .map_err(ClientError::Io)?;
+    pub(crate) fn new(stream: BlockingLocalStream) -> Result<Self, ClientError> {
+        set_read_timeout(&stream, Some(SOCKET_IO_TIMEOUT)).map_err(ClientError::Io)?;
+        set_write_timeout(&stream, Some(SOCKET_IO_TIMEOUT)).map_err(ClientError::Io)?;
 
         Ok(Self {
             stream,
@@ -194,14 +189,10 @@ impl Connection {
         &mut self,
         request: &Request,
     ) -> Result<Response, ClientError> {
-        let previous_timeout = self.stream.read_timeout().map_err(ClientError::Io)?;
-        self.stream
-            .set_read_timeout(None)
-            .map_err(ClientError::Io)?;
+        let previous_timeout = read_timeout(&self.stream).map_err(ClientError::Io)?;
+        set_read_timeout(&self.stream, None).map_err(ClientError::Io)?;
         let result = self.roundtrip(request);
-        self.stream
-            .set_read_timeout(previous_timeout)
-            .map_err(ClientError::Io)?;
+        set_read_timeout(&self.stream, previous_timeout).map_err(ClientError::Io)?;
         result
     }
 
@@ -234,7 +225,7 @@ impl Connection {
         }
     }
 
-    pub(crate) fn stream_mut(&mut self) -> &mut UnixStream {
+    pub(crate) fn stream_mut(&mut self) -> &mut BlockingLocalStream {
         &mut self.stream
     }
 
@@ -242,12 +233,8 @@ impl Connection {
         self,
         response: AttachSessionResponse,
     ) -> Result<AttachSessionUpgrade, ClientError> {
-        self.stream
-            .set_read_timeout(None)
-            .map_err(ClientError::Io)?;
-        self.stream
-            .set_write_timeout(None)
-            .map_err(ClientError::Io)?;
+        set_read_timeout(&self.stream, None).map_err(ClientError::Io)?;
+        set_write_timeout(&self.stream, None).map_err(ClientError::Io)?;
 
         Ok(AttachSessionUpgrade {
             response,
@@ -255,16 +242,13 @@ impl Connection {
         })
     }
 
+    #[cfg(unix)]
     pub(crate) fn into_control_upgrade(
         self,
         response: ControlModeResponse,
     ) -> Result<ControlModeUpgrade, ClientError> {
-        self.stream
-            .set_read_timeout(None)
-            .map_err(ClientError::Io)?;
-        self.stream
-            .set_write_timeout(None)
-            .map_err(ClientError::Io)?;
+        set_read_timeout(&self.stream, None).map_err(ClientError::Io)?;
+        set_write_timeout(&self.stream, None).map_err(ClientError::Io)?;
 
         Ok(ControlModeUpgrade {
             response,
@@ -273,7 +257,9 @@ impl Connection {
     }
 }
 
-pub(crate) fn read_response_frame_exact(stream: &mut UnixStream) -> Result<Response, ClientError> {
+pub(crate) fn read_response_frame_exact(
+    stream: &mut BlockingLocalStream,
+) -> Result<Response, ClientError> {
     let mut header = [0_u8; 4];
     read_exact_or_eof(stream, &mut header)?;
 
@@ -297,7 +283,10 @@ pub(crate) fn read_response_frame_exact(stream: &mut UnixStream) -> Result<Respo
     decode_frame(&frame).map_err(ClientError::Protocol)
 }
 
-fn read_exact_or_eof(stream: &mut UnixStream, buffer: &mut [u8]) -> Result<(), ClientError> {
+fn read_exact_or_eof(
+    stream: &mut BlockingLocalStream,
+    buffer: &mut [u8],
+) -> Result<(), ClientError> {
     match stream.read_exact(buffer) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
@@ -307,7 +296,7 @@ fn read_exact_or_eof(stream: &mut UnixStream, buffer: &mut [u8]) -> Result<(), C
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn socket_path_from_parts(
     rmux_tmpdir: Option<&OsStr>,
     user_id: u32,
@@ -322,7 +311,7 @@ fn socket_path_from_parts(
     Ok(PathBuf::from(OsString::from_vec(path)))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn socket_root_from_parts(rmux_tmpdir: Option<&OsStr>) -> io::Result<PathBuf> {
     let rmux_tmpdir = rmux_tmpdir
         .filter(|value| !value.is_empty())
@@ -349,7 +338,7 @@ fn connect_or_absent_with_timeout_using<F>(
     connect_stream: F,
 ) -> Result<ConnectResult, ClientError>
 where
-    F: FnOnce(&Path, Duration) -> io::Result<UnixStream>,
+    F: FnOnce(&Path, Duration) -> io::Result<BlockingLocalStream>,
 {
     match connect_stream(socket_path, timeout) {
         Ok(stream) => Ok(ConnectResult::Connected(Connection::new(stream)?)),
@@ -364,17 +353,50 @@ fn connect_with_timeout_using<F>(
     connect_stream: F,
 ) -> Result<Connection, ClientError>
 where
-    F: FnOnce(&Path, Duration) -> io::Result<UnixStream>,
+    F: FnOnce(&Path, Duration) -> io::Result<BlockingLocalStream>,
 {
     let stream = connect_stream(socket_path, timeout).map_err(ClientError::Io)?;
     Connection::new(stream)
 }
 
-fn connect_stream_with_timeout(socket_path: &Path, timeout: Duration) -> io::Result<UnixStream> {
+fn connect_stream_with_timeout(
+    socket_path: &Path,
+    timeout: Duration,
+) -> io::Result<BlockingLocalStream> {
     connect_blocking(
         &LocalEndpoint::from_path(socket_path.to_path_buf()),
         timeout,
     )
+}
+
+#[cfg(unix)]
+fn read_timeout(stream: &BlockingLocalStream) -> io::Result<Option<Duration>> {
+    stream.read_timeout()
+}
+
+#[cfg(windows)]
+fn read_timeout(_stream: &BlockingLocalStream) -> io::Result<Option<Duration>> {
+    Ok(None)
+}
+
+#[cfg(unix)]
+fn set_read_timeout(stream: &BlockingLocalStream, timeout: Option<Duration>) -> io::Result<()> {
+    stream.set_read_timeout(timeout)
+}
+
+#[cfg(windows)]
+fn set_read_timeout(_stream: &BlockingLocalStream, _timeout: Option<Duration>) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_write_timeout(stream: &BlockingLocalStream, timeout: Option<Duration>) -> io::Result<()> {
+    stream.set_write_timeout(timeout)
+}
+
+#[cfg(windows)]
+fn set_write_timeout(_stream: &BlockingLocalStream, _timeout: Option<Duration>) -> io::Result<()> {
+    Ok(())
 }
 
 /// Returns `true` for I/O errors that indicate the server is not running.
@@ -385,7 +407,7 @@ fn is_absent_error(error: &io::Error) -> bool {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     include!("connection/tests.rs");
 }

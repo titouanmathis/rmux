@@ -9,7 +9,9 @@ use std::process::ExitStatus;
 use std::ptr::{null, null_mut};
 use std::sync::Arc;
 
-use windows_sys::Win32::Foundation::{GetLastError, HANDLE, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows_sys::Win32::Foundation::{
+    GetLastError, HANDLE, ERROR_ACCESS_DENIED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject, TerminateJobObject,
     JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -18,9 +20,10 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess,
     InitializeProcThreadAttributeList, ResumeThread, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForSingleObject, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
-    EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
-    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW,
+    WaitForSingleObject, CREATE_BREAKAWAY_FROM_JOB, CREATE_SUSPENDED,
+    CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST,
+    PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, STARTF_USESTDHANDLES,
+    STARTUPINFOEXW, STARTUPINFOW,
 };
 
 use crate::{ChildCommand, ProcessId, Result, Signal};
@@ -45,6 +48,47 @@ impl WindowsChild {
 
 pub(crate) fn spawn_child(command: ChildCommand, pty: Arc<WindowsPty>) -> Result<WindowsChild> {
     let job = JobObjectGuard::new()?;
+    let process = create_suspended_process(&command, &pty, 0)?;
+
+    match job.assign(&process.process) {
+        Ok(()) => resume_as_child(process, Some(job), pty),
+        Err(error) if error.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => {
+            let _ = terminate_process(&process.process, 1);
+            spawn_child_breakaway(command, pty)
+        }
+        Err(error) => {
+            let _ = terminate_process(&process.process, 1);
+            Err(error.into())
+        }
+    }
+}
+
+fn spawn_child_breakaway(command: ChildCommand, pty: Arc<WindowsPty>) -> Result<WindowsChild> {
+    let job = JobObjectGuard::new()?;
+    match create_suspended_process(&command, &pty, CREATE_BREAKAWAY_FROM_JOB) {
+        Ok(process) => match job.assign(&process.process) {
+            Ok(()) => resume_as_child(process, Some(job), pty),
+            Err(error) if error.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => {
+                resume_as_child(process, None, pty)
+            }
+            Err(error) => {
+                let _ = terminate_process(&process.process, 1);
+                Err(error.into())
+            }
+        },
+        Err(error) if error.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => {
+            let process = create_suspended_process(&command, &pty, 0)?;
+            resume_as_child(process, None, pty)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn create_suspended_process(
+    command: &ChildCommand,
+    pty: &WindowsPty,
+    extra_creation_flags: u32,
+) -> io::Result<SuspendedProcess> {
     let mut attributes = AttributeList::with_pseudoconsole(pty.hpc())?;
     let mut startup = STARTUPINFOEXW::default();
     startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
@@ -52,8 +96,8 @@ pub(crate) fn spawn_child(command: ChildCommand, pty: Arc<WindowsPty>) -> Result
     startup.lpAttributeList = attributes.as_mut_ptr();
 
     let application = wide_null(command.program.as_os_str());
-    let mut command_line = command_line(&command);
-    let mut environment = environment_block(&command);
+    let mut command_line = command_line(command);
+    let mut environment = environment_block(command);
     let current_dir = command.current_dir.as_ref().map(|path| wide_null(path.as_os_str()));
     let mut process_info = PROCESS_INFORMATION::default();
 
@@ -64,7 +108,10 @@ pub(crate) fn spawn_child(command: ChildCommand, pty: Arc<WindowsPty>) -> Result
             null(),
             null(),
             0,
-            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
+            EXTENDED_STARTUPINFO_PRESENT
+                | CREATE_UNICODE_ENVIRONMENT
+                | CREATE_SUSPENDED
+                | extra_creation_flags,
             environment
                 .as_mut()
                 .map_or(null(), |block| block.as_mut_ptr().cast()),
@@ -74,31 +121,43 @@ pub(crate) fn spawn_child(command: ChildCommand, pty: Arc<WindowsPty>) -> Result
         )
     };
     if created == 0 {
-        return Err(last_os_error().into());
+        return Err(last_os_error());
     }
 
     let process = unsafe { OwnedHandle::from_raw_handle(process_info.hProcess as _) };
     let thread = unsafe { OwnedHandle::from_raw_handle(process_info.hThread as _) };
+    Ok(SuspendedProcess {
+        process,
+        thread,
+        pid: process_info.dwProcessId,
+    })
+}
 
-    if let Err(error) = job.assign(&process) {
-        let _ = unsafe { TerminateProcess(process.as_raw_handle() as HANDLE, 1) };
-        return Err(error.into());
-    }
-
-    let resume = unsafe { ResumeThread(thread.as_raw_handle() as HANDLE) };
+fn resume_as_child(
+    process: SuspendedProcess,
+    job: Option<JobObjectGuard>,
+    pty: Arc<WindowsPty>,
+) -> Result<WindowsChild> {
+    let resume = unsafe { ResumeThread(process.thread.as_raw_handle() as HANDLE) };
     if resume == u32::MAX {
-        let _ = unsafe { TerminateProcess(process.as_raw_handle() as HANDLE, 1) };
+        let _ = terminate_process(&process.process, 1);
         return Err(last_os_error().into());
     }
 
-    let pid = ProcessId::new(process_info.dwProcessId)?;
+    let pid = ProcessId::new(process.pid)?;
     Ok(WindowsChild {
-        process,
-        thread,
-        job: Some(job),
+        process: process.process,
+        thread: process.thread,
+        job,
         pty,
         pid,
     })
+}
+
+struct SuspendedProcess {
+    process: OwnedHandle,
+    thread: OwnedHandle,
+    pid: u32,
 }
 
 pub(crate) fn wait_child(child: &mut WindowsChild) -> Result<ExitStatus> {
@@ -131,14 +190,19 @@ pub(crate) fn kill_child(child: &WindowsChild, signal: Signal) -> Result<()> {
             if let Some(job) = &child.job {
                 job.terminate(1)?;
             } else {
-                let ok = unsafe { TerminateProcess(child.process.as_raw_handle() as HANDLE, 1) };
-                if ok == 0 {
-                    return Err(last_os_error().into());
-                }
+                terminate_process(&child.process, 1)?;
             }
             Ok(())
         }
     }
+}
+
+fn terminate_process(process: &OwnedHandle, exit_code: u32) -> io::Result<()> {
+    let ok = unsafe { TerminateProcess(process.as_raw_handle() as HANDLE, exit_code) };
+    if ok == 0 {
+        return Err(last_os_error());
+    }
+    Ok(())
 }
 
 fn exit_status(process: &OwnedHandle) -> Result<ExitStatus> {

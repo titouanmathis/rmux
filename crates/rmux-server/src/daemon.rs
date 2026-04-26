@@ -236,7 +236,11 @@ impl ServerDaemon {
             let (shutdown_handle, shutdown_receiver) = ShutdownHandle::new();
             let socket_path = self.config.socket_path().to_path_buf();
 
-            let task = tokio::spawn(windows_runtime::serve(listener, shutdown_receiver));
+            let task = tokio::spawn(windows_runtime::serve(
+                listener,
+                shutdown_handle.clone(),
+                shutdown_receiver,
+            ));
 
             Ok(ServerHandle {
                 socket_path,
@@ -588,8 +592,8 @@ mod tests {
 mod tests {
     use super::{DaemonConfig, ServerDaemon};
     use rmux_proto::{
-        encode_frame, ErrorResponse, FrameDecoder, ListSessionsRequest, Request, Response,
-        RmuxError,
+        encode_frame, ErrorResponse, FrameDecoder, KillServerRequest, ListSessionsRequest, Request,
+        Response, RmuxError,
     };
     use std::io::{self, Read, Write};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -628,6 +632,28 @@ mod tests {
         ));
         assert_eq!(handle.socket_path(), socket_path.as_path());
         handle.shutdown().await
+    }
+
+    #[tokio::test]
+    async fn windows_daemon_kill_server_stops_runtime() -> io::Result<()> {
+        let endpoint = unique_endpoint()?;
+        let socket_path = endpoint.clone().into_path();
+        let handle = ServerDaemon::new(DaemonConfig::new(socket_path))
+            .bind()
+            .await?;
+
+        let response = tokio::task::spawn_blocking(move || {
+            let mut stream = rmux_ipc::connect_blocking(&endpoint, Duration::from_secs(5))?;
+            let frame =
+                encode_frame(&Request::KillServer(KillServerRequest)).map_err(io::Error::other)?;
+            stream.write_all(&frame)?;
+            read_response(&mut stream)
+        })
+        .await
+        .map_err(io::Error::other)??;
+
+        assert!(matches!(response, Response::KillServer(_)));
+        handle.wait().await
     }
 
     fn unique_endpoint() -> io::Result<rmux_ipc::LocalEndpoint> {

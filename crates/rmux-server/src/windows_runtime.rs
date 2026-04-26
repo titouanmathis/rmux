@@ -9,11 +9,14 @@ use tokio::sync::oneshot;
 use tokio::task::{JoinError, JoinSet};
 use tracing::warn;
 
+use crate::daemon::ShutdownHandle;
+
 const WINDOWS_RUNTIME_UNSUPPORTED: &str =
     "rmux-server accepts Windows IPC, but session runtime support is not enabled yet";
 
 pub(crate) async fn serve(
     listener: LocalListener,
+    shutdown_handle: ShutdownHandle,
     mut shutdown: oneshot::Receiver<()>,
 ) -> io::Result<()> {
     let mut connection_tasks = JoinSet::new();
@@ -22,7 +25,7 @@ pub(crate) async fn serve(
         tokio::select! {
             result = listener.accept() => {
                 let (stream, _peer) = result?;
-                connection_tasks.spawn(serve_connection(stream));
+                connection_tasks.spawn(serve_connection(stream, shutdown_handle.clone()));
             }
             _ = &mut shutdown => {
                 break;
@@ -38,14 +41,28 @@ pub(crate) async fn serve(
     Ok(())
 }
 
-async fn serve_connection(stream: LocalStream) -> io::Result<()> {
+async fn serve_connection(stream: LocalStream, shutdown_handle: ShutdownHandle) -> io::Result<()> {
     let mut conn = Connection::new(stream);
 
-    while let Some(_request) = conn.read_request().await? {
-        conn.write_response(&unsupported_response()).await?;
+    while let Some(request) = conn.read_request().await? {
+        let should_shutdown = matches!(request, Request::KillServer(_));
+        let response = dispatch_minimal_windows_request(request);
+        conn.write_response(&response).await?;
+
+        if should_shutdown {
+            shutdown_handle.request_shutdown();
+            break;
+        }
     }
 
     Ok(())
+}
+
+fn dispatch_minimal_windows_request(request: Request) -> Response {
+    match request {
+        Request::KillServer(_) => Response::KillServer(rmux_proto::KillServerResponse),
+        _ => unsupported_response(),
+    }
 }
 
 fn unsupported_response() -> Response {

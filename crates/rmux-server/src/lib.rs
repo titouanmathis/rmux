@@ -8,7 +8,8 @@
 mod client_flags;
 #[cfg(unix)]
 mod clock_mode;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
+#[cfg_attr(windows, allow(dead_code))]
 mod control;
 #[cfg(any(unix, windows))]
 #[cfg_attr(windows, allow(dead_code))]

@@ -1,24 +1,38 @@
+#[cfg(unix)]
 use std::collections::{HashMap, HashSet, VecDeque};
+#[cfg(unix)]
 use std::io;
+#[cfg(unix)]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(unix)]
 use std::sync::Arc;
+#[cfg(unix)]
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+#[cfg(unix)]
 use rmux_ipc::LocalStream;
+#[cfg(unix)]
 use rmux_proto::{
     format_exit_line, format_extended_output_line, format_guard_line, format_output_line,
     format_pause_line, ControlGuardKind, SessionName, CONTROL_BUFFER_HIGH,
 };
+#[cfg(unix)]
 use tokio::io::{AsyncReadExt, WriteHalf};
+#[cfg(unix)]
 use tokio::sync::{broadcast, mpsc, watch};
+#[cfg(unix)]
 use tokio::task::JoinHandle;
 
+#[cfg(unix)]
 pub(crate) use crate::control_mode::ControlModeUpgrade;
+#[cfg(unix)]
 use crate::daemon::ShutdownHandle;
+#[cfg(unix)]
 use crate::handler::RequestHandler;
 
 #[path = "control/output_queue.rs"]
 mod output_queue;
+#[cfg(unix)]
 use output_queue::{ensure_control_newline, flush_output_queue, ControlOutputQueue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -36,6 +50,7 @@ impl ControlClientFlags {
 }
 
 #[derive(Debug, Clone)]
+#[cfg(unix)]
 pub(crate) enum ControlServerEvent {
     SessionChanged(Option<SessionName>),
     Refresh,
@@ -44,17 +59,20 @@ pub(crate) enum ControlServerEvent {
 }
 
 #[derive(Debug, Clone)]
+#[cfg(unix)]
 pub(crate) struct ControlCommandResult {
     pub(crate) stdout: Vec<u8>,
     pub(crate) error: Option<rmux_proto::RmuxError>,
 }
 
 #[derive(Debug)]
+#[cfg(unix)]
 pub(crate) struct ControlLifecycle {
     pub(crate) closing: Arc<AtomicBool>,
     pub(crate) shutdown_handle: ShutdownHandle,
 }
 
+#[cfg(unix)]
 pub(crate) async fn forward_control(
     stream: LocalStream,
     handler: Arc<RequestHandler>,
@@ -305,6 +323,7 @@ pub(crate) async fn forward_control(
     }
 }
 
+#[cfg(unix)]
 async fn handle_server_event(
     event: ControlServerEvent,
     context: &mut ServerEventContext<'_>,
@@ -379,6 +398,7 @@ async fn handle_server_event(
     Ok(false)
 }
 
+#[cfg(unix)]
 async fn flush_deferred_server_events(context: &mut ServerEventContext<'_>) -> io::Result<bool> {
     while let Some(line) = context.deferred.notifications.pop_front() {
         if handle_server_event(ControlServerEvent::Notification(line), context, false).await? {
@@ -393,6 +413,7 @@ async fn flush_deferred_server_events(context: &mut ServerEventContext<'_>) -> i
     Ok(false)
 }
 
+#[cfg(unix)]
 struct ServerEventContext<'a> {
     handler: &'a RequestHandler,
     requester_pid: u32,
@@ -408,12 +429,14 @@ struct ServerEventContext<'a> {
 }
 
 #[derive(Debug, Default)]
+#[cfg(unix)]
 struct DeferredServerEvents {
     notifications: VecDeque<String>,
     exit_reason: Option<Option<String>>,
 }
 
 #[derive(Debug)]
+#[cfg(unix)]
 struct ActiveControlCommand {
     timestamp: i64,
     command_number: u64,
@@ -421,6 +444,7 @@ struct ActiveControlCommand {
 }
 
 #[derive(Debug)]
+#[cfg(unix)]
 enum PaneEvent {
     Data {
         pane_id: u32,
@@ -431,10 +455,12 @@ enum PaneEvent {
 }
 
 #[derive(Debug)]
+#[cfg(unix)]
 struct PaneSubscription {
     stop_tx: tokio::sync::oneshot::Sender<()>,
 }
 
+#[cfg(unix)]
 async fn refresh_subscriptions(
     handler: &RequestHandler,
     session_name: Option<&SessionName>,
@@ -497,6 +523,7 @@ async fn refresh_subscriptions(
     }
 }
 
+#[cfg(unix)]
 fn extract_complete_control_lines(buffer: &mut Vec<u8>) -> Vec<String> {
     let mut lines = Vec::new();
 
@@ -514,6 +541,7 @@ fn extract_complete_control_lines(buffer: &mut Vec<u8>) -> Vec<String> {
     lines
 }
 
+#[cfg(unix)]
 fn handle_pane_event(
     event: PaneEvent,
     output_queue: &mut ControlOutputQueue,
@@ -552,6 +580,7 @@ fn handle_pane_event(
     Ok(())
 }
 
+#[cfg(unix)]
 fn drain_ready_pane_events(
     pane_event_rx: &mut mpsc::UnboundedReceiver<PaneEvent>,
     output_queue: &mut ControlOutputQueue,
@@ -567,6 +596,7 @@ fn drain_ready_pane_events(
     }
 }
 
+#[cfg(unix)]
 fn unix_epoch_seconds() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -574,6 +604,6 @@ fn unix_epoch_seconds() -> i64 {
         .as_secs() as i64
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "control/tests.rs"]
 mod tests;

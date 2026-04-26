@@ -1,4 +1,3 @@
-use std::env;
 use std::fs;
 use std::io;
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt};
@@ -6,32 +5,28 @@ use std::os::unix::net::UnixStream as StdUnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
-use tokio::net::UnixListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::debug;
 
+use rmux_ipc::{LocalEndpoint, LocalListener};
+
 use crate::listener;
 
-const DEFAULT_SOCKET_LABEL: &str = "default";
+#[cfg(test)]
 const FALLBACK_SOCKET_ROOT: &str = "/tmp";
 const RMUX_SOCK_PERM: u32 = 0o007;
 const SOCKET_DIR_PREFIX: &str = "rmux";
-const RMUX_TMPDIR_ENV: &str = "RMUX_TMPDIR";
 
 /// Computes the default RMUX daemon socket path.
 ///
 /// The path uses an rmux-specific per-user directory so it cannot collide with
 /// a real tmux server socket.
 pub fn default_socket_path() -> io::Result<PathBuf> {
-    let tmpdir = socket_root_from_env(env::var_os(RMUX_TMPDIR_ENV).as_deref())?;
-    let user_id = real_user_id()?;
-
-    Ok(tmpdir
-        .join(format!("{SOCKET_DIR_PREFIX}-{user_id}"))
-        .join(DEFAULT_SOCKET_LABEL))
+    rmux_ipc::default_endpoint().map(LocalEndpoint::into_path)
 }
 
+#[cfg(test)]
 fn socket_root_from_env(tmpdir: Option<&std::ffi::OsStr>) -> io::Result<PathBuf> {
     let tmpdir = tmpdir
         .filter(|value| !value.is_empty())
@@ -201,7 +196,8 @@ impl ServerDaemon {
     /// Binds the Unix socket, starts accepting requests, and returns a handle.
     pub async fn bind(self) -> io::Result<ServerHandle> {
         prepare_socket_path(self.config.socket_path())?;
-        let listener = UnixListener::bind(self.config.socket_path())?;
+        let endpoint = LocalEndpoint::from_path(self.config.socket_path().to_path_buf());
+        let listener = LocalListener::bind(&endpoint)?;
         let (shutdown_handle, shutdown_receiver) = ShutdownHandle::new();
         let socket_path = self.config.socket_path().to_path_buf();
         let owner_uid = real_user_id()?;

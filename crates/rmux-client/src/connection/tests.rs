@@ -267,7 +267,7 @@ fn connect_with_timeout_preserves_timeout_errors() {
     let error = super::connect_with_timeout_using(
         socket_path,
         Duration::from_millis(100),
-        |path, timeout| Err(super::connect_timeout_error(path, timeout)),
+        |_path, _timeout| Err(io::Error::new(io::ErrorKind::TimedOut, "connect timeout")),
     )
     .expect_err("timed-out connects must stay errors");
     assert!(matches!(
@@ -282,29 +282,13 @@ fn connect_or_absent_preserves_timeout_errors() {
     let error = super::connect_or_absent_with_timeout_using(
         socket_path,
         Duration::from_millis(100),
-        |path, timeout| Err(super::connect_timeout_error(path, timeout)),
+        |_path, _timeout| Err(io::Error::new(io::ErrorKind::TimedOut, "connect timeout")),
     )
     .expect_err("timed-out connects must not be treated as Absent");
     assert!(matches!(
         error,
         ClientError::Io(error) if error.kind() == io::ErrorKind::TimedOut
     ));
-}
-
-#[test]
-fn wait_for_connect_completion_times_out_when_progress_never_arrives() {
-    let socket_path = Path::new("/tmp/rmux-wait-connect-timeout/default");
-    let error = super::wait_for_connect_completion(
-        socket_path,
-        Duration::from_millis(50),
-        |remaining| {
-            std::thread::sleep(remaining.min(Duration::from_millis(10)));
-            Ok(super::ConnectProgress::Pending)
-        },
-        || Ok(super::ConnectProgress::Pending),
-    )
-    .expect_err("timeout loop should stop when readiness never arrives");
-    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
 }
 
 #[test]

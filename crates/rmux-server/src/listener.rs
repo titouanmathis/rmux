@@ -3,10 +3,10 @@ use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rmux_ipc::{LocalListener, LocalStream, PeerIdentity};
 use rmux_proto::{encode_frame, ErrorResponse, FrameDecoder, Request, Response};
 use rustix::net::RecvFlags;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{oneshot, watch};
 use tokio::task::{JoinError, JoinSet};
 use tracing::{debug, warn};
@@ -20,7 +20,7 @@ use crate::ConfigLoadOptions;
 
 /// Accept loop: spawns a per-connection task for each incoming client.
 pub(crate) async fn serve(
-    listener: UnixListener,
+    listener: LocalListener,
     socket_path: PathBuf,
     shutdown_handle: ShutdownHandle,
     mut shutdown: oneshot::Receiver<()>,
@@ -46,13 +46,13 @@ pub(crate) async fn serve(
     loop {
         tokio::select! {
             result = listener.accept() => {
-                let (stream, _addr) = result?;
+                let (stream, requester) = result?;
                 let handler = Arc::clone(&handler);
                 let connection_shutdown = connection_shutdown_rx.clone();
                 let shutdown_handle = shutdown_handle.clone();
 
                 connection_tasks.spawn(async move {
-                    serve_connection(stream, handler, connection_shutdown, shutdown_handle).await
+                    serve_connection(stream, requester, handler, connection_shutdown, shutdown_handle).await
                 });
             }
             Some(result) = connection_tasks.join_next(), if !connection_tasks.is_empty() => {
@@ -79,12 +79,12 @@ pub(crate) async fn serve(
 
 /// Read-dispatch-write loop for a single client connection.
 async fn serve_connection(
-    stream: UnixStream,
+    stream: LocalStream,
+    requester: PeerIdentity,
     handler: Arc<RequestHandler>,
     mut shutdown: watch::Receiver<()>,
     shutdown_handle: ShutdownHandle,
 ) -> io::Result<()> {
-    let requester = peer_credentials(&stream)?;
     let Some(access_mode) = handler.access_mode_for_uid(requester.uid) else {
         let mut conn = Connection::new(stream);
         conn.write_response(&Response::Error(ErrorResponse {
@@ -219,25 +219,7 @@ async fn serve_connection(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PeerCredentials {
-    pid: u32,
-    uid: u32,
-}
-
-fn peer_credentials(stream: &UnixStream) -> io::Result<PeerCredentials> {
-    let credentials = stream.peer_cred()?;
-    let pid = credentials
-        .pid()
-        .ok_or_else(|| io::Error::other("unix peer credentials did not include a pid"))?;
-    let uid = credentials.uid();
-
-    let pid =
-        u32::try_from(pid).map_err(|_| io::Error::other(format!("invalid unix peer pid {pid}")))?;
-    Ok(PeerCredentials { pid, uid })
-}
-
-async fn wait_for_peer_close(stream: &UnixStream) -> io::Result<()> {
+async fn wait_for_peer_close(stream: &LocalStream) -> io::Result<()> {
     loop {
         if let Err(error) = stream.readable().await {
             if is_peer_disconnect(&error) {
@@ -273,13 +255,13 @@ fn log_connection_task_result(result: Result<io::Result<()>, JoinError>) {
 }
 
 struct Connection {
-    stream: UnixStream,
+    stream: LocalStream,
     decoder: FrameDecoder,
     read_buffer: [u8; 8192],
 }
 
 impl Connection {
-    fn new(stream: UnixStream) -> Self {
+    fn new(stream: LocalStream) -> Self {
         Self {
             stream,
             decoder: FrameDecoder::new(),
@@ -313,7 +295,7 @@ impl Connection {
         self.stream.write_all(&frame).await
     }
 
-    fn into_raw_parts(self) -> (UnixStream, Vec<u8>) {
+    fn into_raw_parts(self) -> (LocalStream, Vec<u8>) {
         let buffered_bytes = self.decoder.remaining_bytes().to_vec();
         (self.stream, buffered_bytes)
     }
@@ -402,16 +384,26 @@ mod tests {
     fn spawn_test_connection(
         handler: &Arc<RequestHandler>,
     ) -> io::Result<(
-        UnixStream,
+        LocalStream,
         watch::Sender<()>,
         tokio::task::JoinHandle<io::Result<()>>,
     )> {
-        let (server, client) = UnixStream::pair()?;
+        let (server, client) = LocalStream::pair()?;
         let handler = Arc::clone(handler);
         let (shutdown_tx, shutdown_rx) = watch::channel(());
         let (shutdown_handle, _shutdown_request_rx) = ShutdownHandle::new();
         let task = tokio::spawn(async move {
-            serve_connection(server, handler, shutdown_rx, shutdown_handle).await
+            serve_connection(
+                server,
+                PeerIdentity {
+                    pid: std::process::id(),
+                    uid: rmux_os::identity::real_user_id(),
+                },
+                handler,
+                shutdown_rx,
+                shutdown_handle,
+            )
+            .await
         });
         Ok((client, shutdown_tx, task))
     }
@@ -423,7 +415,7 @@ mod tests {
         })
     }
 
-    async fn write_test_request(stream: &mut UnixStream, request: Request) -> io::Result<()> {
+    async fn write_test_request(stream: &mut LocalStream, request: Request) -> io::Result<()> {
         let frame = encode_frame(&request).map_err(io::Error::other)?;
         stream.write_all(&frame).await
     }

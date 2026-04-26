@@ -3,11 +3,12 @@ members = [
     ".",
     "crates/rmux-types",
     "crates/rmux-proto",
-    "crates/rmux-pty",
-    "crates/rmux-os",
     "crates/rmux-core",
-    "crates/rmux-server",
+    "crates/rmux-os",
+    "crates/rmux-ipc",
+    "crates/rmux-pty",
     "crates/rmux-client",
+    "crates/rmux-server",
 ]
 resolver = "2"
 

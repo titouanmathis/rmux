@@ -1,28 +1,23 @@
 //! Blocking Unix-socket transport for detached RPC traffic.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
+#[cfg(test)]
+use std::ffi::OsString;
+#[cfg(test)]
 use std::fs;
 use std::io::{self, Read, Write};
-use std::os::fd::AsFd;
-#[cfg(not(target_os = "linux"))]
-use std::os::fd::AsRawFd;
+#[cfg(test)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use crate::ClientError;
+use rmux_ipc::{connect_blocking, LocalEndpoint};
 use rmux_proto::{
     decode_frame, encode_frame, AttachSessionResponse, ControlMode, ControlModeResponse,
     FrameDecoder, Request, Response, RmuxError, DEFAULT_MAX_FRAME_LENGTH,
 };
-use rustix::event::{poll, PollFd, PollFlags, Timespec};
-use rustix::net::sockopt::socket_error;
-use rustix::net::{
-    connect as socket_connect, socket_with, AddressFamily, SocketAddrUnix, SocketFlags, SocketType,
-};
-use rustix::process::getuid;
-
-use crate::ClientError;
 
 /// Read buffer size for blocking socket reads.
 const READ_BUFFER_SIZE: usize = 8192;
@@ -30,28 +25,26 @@ const READ_BUFFER_SIZE: usize = 8192;
 /// reads.
 const SOCKET_IO_TIMEOUT: Duration = Duration::from_secs(5);
 
-const DEFAULT_SOCKET_LABEL: &str = "default";
+#[cfg(test)]
 const FALLBACK_SOCKET_ROOT: &str = "/tmp";
+#[cfg(test)]
 const SOCKET_DIR_PREFIX: &str = "rmux";
-const RMUX_ENV: &str = "RMUX";
-const RMUX_TMPDIR_ENV: &str = "RMUX_TMPDIR";
 
 /// Computes the default RMUX client socket path.
 ///
 /// The path uses an rmux-specific per-user directory so an rmux client never
 /// speaks the rmux wire protocol to a real tmux server.
 pub fn default_socket_path() -> Result<PathBuf, ClientError> {
-    socket_path_for_label(DEFAULT_SOCKET_LABEL)
+    rmux_ipc::default_endpoint()
+        .map(LocalEndpoint::into_path)
+        .map_err(ClientError::Io)
 }
 
 /// Computes an rmux socket path for a top-level `-L` socket name.
 pub fn socket_path_for_label(label: impl AsRef<OsStr>) -> Result<PathBuf, ClientError> {
-    socket_path_from_parts(
-        std::env::var_os(RMUX_TMPDIR_ENV).as_deref(),
-        getuid().as_raw(),
-        label.as_ref(),
-    )
-    .map_err(ClientError::Io)
+    rmux_ipc::endpoint_for_label(label)
+        .map(LocalEndpoint::into_path)
+        .map_err(ClientError::Io)
 }
 
 /// Resolves the top-level socket path from `-L`, `-S`, `$RMUX`, or defaults.
@@ -61,17 +54,9 @@ pub fn resolve_socket_path(
     socket_name: Option<&OsStr>,
     socket_path: Option<&Path>,
 ) -> Result<PathBuf, ClientError> {
-    if let Some(socket_path) = socket_path {
-        return Ok(socket_path.to_path_buf());
-    }
-    if let Some(socket_name) = socket_name {
-        return socket_path_for_label(socket_name);
-    }
-    if let Some(socket_path) = socket_path_from_rmux_env(std::env::var_os(RMUX_ENV).as_deref()) {
-        return Ok(socket_path);
-    }
-
-    default_socket_path()
+    rmux_ipc::resolve_endpoint(socket_name, socket_path)
+        .map(LocalEndpoint::into_path)
+        .map_err(ClientError::Io)
 }
 
 /// Result of attempting to connect to the RMUX server.
@@ -322,6 +307,7 @@ fn read_exact_or_eof(stream: &mut UnixStream, buffer: &mut [u8]) -> Result<(), C
     }
 }
 
+#[cfg(test)]
 fn socket_path_from_parts(
     rmux_tmpdir: Option<&OsStr>,
     user_id: u32,
@@ -336,6 +322,7 @@ fn socket_path_from_parts(
     Ok(PathBuf::from(OsString::from_vec(path)))
 }
 
+#[cfg(test)]
 fn socket_root_from_parts(rmux_tmpdir: Option<&OsStr>) -> io::Result<PathBuf> {
     let rmux_tmpdir = rmux_tmpdir
         .filter(|value| !value.is_empty())
@@ -354,30 +341,6 @@ fn socket_root_from_parts(rmux_tmpdir: Option<&OsStr>) -> io::Result<PathBuf> {
         io::ErrorKind::NotFound,
         "no suitable rmux socket directory",
     ))
-}
-
-fn socket_path_from_rmux_env(rmux: Option<&OsStr>) -> Option<PathBuf> {
-    let rmux = rmux?;
-    let bytes = rmux.as_bytes();
-    if bytes.is_empty() || bytes.first() == Some(&b',') {
-        return None;
-    }
-
-    let end = bytes
-        .iter()
-        .position(|byte| *byte == b',')
-        .unwrap_or(bytes.len());
-    let path = PathBuf::from(OsString::from_vec(bytes[..end].to_vec()));
-    socket_path_is_rmux_owned(&path).then_some(path)
-}
-
-fn socket_path_is_rmux_owned(path: &Path) -> bool {
-    path.parent()
-        .and_then(Path::file_name)
-        .and_then(OsStr::to_str)
-        .is_some_and(|name| {
-            name.starts_with(SOCKET_DIR_PREFIX) && name[SOCKET_DIR_PREFIX.len()..].starts_with('-')
-        })
 }
 
 fn connect_or_absent_with_timeout_using<F>(
@@ -408,167 +371,10 @@ where
 }
 
 fn connect_stream_with_timeout(socket_path: &Path, timeout: Duration) -> io::Result<UnixStream> {
-    let address = SocketAddrUnix::new(socket_path)?;
-    let socket = socket_with(
-        AddressFamily::UNIX,
-        SocketType::STREAM,
-        socket_creation_flags(),
-        None,
-    )?;
-    configure_socket_for_connect(&socket)?;
-
-    match socket_connect(&socket, &address) {
-        Ok(()) => {}
-        Err(rustix::io::Errno::INPROGRESS | rustix::io::Errno::WOULDBLOCK) => {
-            wait_for_socket_connect(&socket, socket_path, timeout)?
-        }
-        Err(error) => return Err(error.into()),
-    }
-
-    let stream = UnixStream::from(socket);
-    stream.set_nonblocking(false)?;
-    Ok(stream)
-}
-
-fn wait_for_socket_connect<Fd>(socket: &Fd, socket_path: &Path, timeout: Duration) -> io::Result<()>
-where
-    Fd: AsFd,
-{
-    wait_for_connect_completion(
-        socket_path,
+    connect_blocking(
+        &LocalEndpoint::from_path(socket_path.to_path_buf()),
         timeout,
-        |remaining| {
-            let poll_timeout = Timespec {
-                tv_sec: remaining.as_secs() as i64,
-                tv_nsec: remaining.subsec_nanos().into(),
-            };
-            let mut fds = [PollFd::new(
-                socket,
-                PollFlags::OUT | PollFlags::ERR | PollFlags::HUP,
-            )];
-
-            match poll(&mut fds, Some(&poll_timeout)) {
-                Ok(0) => Ok(ConnectProgress::Pending),
-                Ok(_) => Ok(ConnectProgress::Ready),
-                Err(rustix::io::Errno::INTR) => Ok(ConnectProgress::Pending),
-                Err(error) => Err(error.into()),
-            }
-        },
-        || match socket_error(socket)? {
-            Ok(()) => Ok(ConnectProgress::Ready),
-            Err(rustix::io::Errno::INPROGRESS | rustix::io::Errno::WOULDBLOCK) => {
-                Ok(ConnectProgress::Pending)
-            }
-            Err(error) => Err(error.into()),
-        },
     )
-}
-
-#[cfg(target_os = "linux")]
-fn socket_creation_flags() -> SocketFlags {
-    SocketFlags::CLOEXEC | SocketFlags::NONBLOCK
-}
-
-#[cfg(not(target_os = "linux"))]
-fn socket_creation_flags() -> SocketFlags {
-    SocketFlags::empty()
-}
-
-#[cfg(target_os = "linux")]
-fn configure_socket_for_connect<Fd>(_socket: &Fd) -> io::Result<()>
-where
-    Fd: AsFd,
-{
-    Ok(())
-}
-
-#[cfg(not(target_os = "linux"))]
-fn configure_socket_for_connect<Fd>(socket: &Fd) -> io::Result<()>
-where
-    Fd: AsFd,
-{
-    let raw_fd = socket.as_fd().as_raw_fd();
-    set_fd_flag(raw_fd, libc::FD_CLOEXEC)?;
-    set_status_flag(raw_fd, libc::O_NONBLOCK)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn set_fd_flag(raw_fd: libc::c_int, flag: libc::c_int) -> io::Result<()> {
-    // SAFETY: `fcntl` reads descriptor flags from a valid socket fd.
-    let flags = unsafe { libc::fcntl(raw_fd, libc::F_GETFD) };
-    if flags == -1 {
-        return Err(io::Error::last_os_error());
-    }
-
-    // SAFETY: `fcntl` updates only descriptor flags for the same valid fd.
-    let result = unsafe { libc::fcntl(raw_fd, libc::F_SETFD, flags | flag) };
-    if result == -1 {
-        return Err(io::Error::last_os_error());
-    }
-
-    Ok(())
-}
-
-#[cfg(not(target_os = "linux"))]
-fn set_status_flag(raw_fd: libc::c_int, flag: libc::c_int) -> io::Result<()> {
-    // SAFETY: `fcntl` reads file status flags from a valid socket fd.
-    let flags = unsafe { libc::fcntl(raw_fd, libc::F_GETFL) };
-    if flags == -1 {
-        return Err(io::Error::last_os_error());
-    }
-
-    // SAFETY: `fcntl` updates only file status flags for the same valid fd.
-    let result = unsafe { libc::fcntl(raw_fd, libc::F_SETFL, flags | flag) };
-    if result == -1 {
-        return Err(io::Error::last_os_error());
-    }
-
-    Ok(())
-}
-
-fn connect_timeout_error(socket_path: &Path, timeout: Duration) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::TimedOut,
-        format!(
-            "timed out after {}s connecting to '{}'",
-            timeout.as_secs_f32(),
-            socket_path.display()
-        ),
-    )
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ConnectProgress {
-    Pending,
-    Ready,
-}
-
-fn wait_for_connect_completion<P, S>(
-    socket_path: &Path,
-    timeout: Duration,
-    mut wait_for_ready: P,
-    mut check_status: S,
-) -> io::Result<()>
-where
-    P: FnMut(Duration) -> io::Result<ConnectProgress>,
-    S: FnMut() -> io::Result<ConnectProgress>,
-{
-    let deadline = Instant::now() + timeout;
-
-    loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err(connect_timeout_error(socket_path, timeout));
-        }
-
-        if wait_for_ready(remaining)? == ConnectProgress::Pending {
-            continue;
-        }
-
-        if check_status()? == ConnectProgress::Ready {
-            return Ok(());
-        }
-    }
 }
 
 /// Returns `true` for I/O errors that indicate the server is not running.

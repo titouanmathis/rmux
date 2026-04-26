@@ -381,6 +381,7 @@ version = "3.9.2"
 dependencies = [
  "libc",
  "rmux-core",
+ "rmux-ipc",
  "rmux-proto",
  "rmux-pty",
  "rmux-server",
@@ -397,6 +398,16 @@ dependencies = [
  "regex",
  "rmux-proto",
  "unicode-width",
+]
+
+[[package]]
+name = "rmux-ipc"
+version = "3.9.2"
+dependencies = [
+ "libc",
+ "rmux-os",
+ "rustix",
+ "tokio",
 ]
 
 [[package]]
@@ -435,6 +446,7 @@ dependencies = [
  "glob",
  "regex",
  "rmux-core",
+ "rmux-ipc",
  "rmux-os",
  "rmux-proto",
  "rmux-pty",

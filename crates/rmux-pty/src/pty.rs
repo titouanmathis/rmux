@@ -2,10 +2,11 @@ use std::io;
 
 #[cfg(unix)]
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
+#[cfg(windows)]
+use std::sync::Arc;
 
-#[cfg(unix)]
 use crate::backend;
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 use crate::PtyError;
 use crate::{Result, TerminalSize};
 
@@ -33,12 +34,19 @@ impl PtySlave {
 pub struct PtyIo {
     #[cfg(unix)]
     fd: OwnedFd,
+    #[cfg(windows)]
+    pty: Arc<backend::WindowsPty>,
 }
 
 impl PtyIo {
     #[cfg(unix)]
     pub(crate) fn new(fd: OwnedFd) -> Self {
         Self { fd }
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn new(pty: Arc<backend::WindowsPty>) -> Self {
+        Self { pty }
     }
 
     /// Queries the current terminal geometry for this PTY endpoint.
@@ -50,7 +58,15 @@ impl PtyIo {
 
         #[cfg(not(unix))]
         {
-            Err(PtyError::Unsupported("query pty size"))
+            #[cfg(windows)]
+            {
+                backend::query_size(&self.pty)
+            }
+
+            #[cfg(not(windows))]
+            {
+                Err(PtyError::Unsupported("query pty size"))
+            }
         }
     }
 
@@ -63,8 +79,16 @@ impl PtyIo {
 
         #[cfg(not(unix))]
         {
-            let _ = size;
-            Err(PtyError::Unsupported("resize pty"))
+            #[cfg(windows)]
+            {
+                backend::apply_size(&self.pty, size)
+            }
+
+            #[cfg(not(windows))]
+            {
+                let _ = size;
+                Err(PtyError::Unsupported("resize pty"))
+            }
         }
     }
 
@@ -79,7 +103,17 @@ impl PtyIo {
 
         #[cfg(not(unix))]
         {
-            Err(PtyError::Unsupported("clone pty io"))
+            #[cfg(windows)]
+            {
+                Ok(Self {
+                    pty: Arc::clone(&self.pty),
+                })
+            }
+
+            #[cfg(not(windows))]
+            {
+                Err(PtyError::Unsupported("clone pty io"))
+            }
         }
     }
 
@@ -92,11 +126,19 @@ impl PtyIo {
 
         #[cfg(not(unix))]
         {
-            let _ = buffer;
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "pty I/O is unsupported on this platform",
-            ))
+            #[cfg(windows)]
+            {
+                self.pty.read(buffer)
+            }
+
+            #[cfg(not(windows))]
+            {
+                let _ = buffer;
+                Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "pty I/O is unsupported on this platform",
+                ))
+            }
         }
     }
 
@@ -109,11 +151,19 @@ impl PtyIo {
 
         #[cfg(not(unix))]
         {
-            let _ = bytes;
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "pty I/O is unsupported on this platform",
-            ))
+            #[cfg(windows)]
+            {
+                self.pty.write_all(bytes)
+            }
+
+            #[cfg(not(windows))]
+            {
+                let _ = bytes;
+                Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "pty I/O is unsupported on this platform",
+                ))
+            }
         }
     }
 
@@ -171,6 +221,13 @@ impl PtyMaster {
     #[cfg(unix)]
     pub(crate) fn new(fd: OwnedFd) -> Self {
         Self { io: PtyIo::new(fd) }
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn new(pty: backend::WindowsPty) -> Self {
+        Self {
+            io: PtyIo::new(Arc::new(pty)),
+        }
     }
 
     /// Queries the current terminal geometry for this PTY.
@@ -239,7 +296,16 @@ impl PtyPair {
             })
         }
 
+        #[cfg(windows)]
+        {
+            let master = backend::open_pty_pair(TerminalSize::new(80, 24))?;
+            Ok(Self {
+                master: PtyMaster::new(master),
+            })
+        }
+
         #[cfg(not(unix))]
+        #[cfg(not(windows))]
         {
             Err(PtyError::Unsupported("open pty pair"))
         }

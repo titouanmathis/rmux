@@ -166,10 +166,7 @@ mod tests {
     #[cfg(not(unix))]
     #[test]
     fn unsupported_backend_returns_explicit_errors() {
-        use super::{ChildCommand, PtyError, PtyPair};
-
-        let pair = PtyPair::open().expect_err("Windows PTY backend is introduced in Milestone 5");
-        assert!(matches!(pair, PtyError::Unsupported("open pty pair")));
+        use super::{ChildCommand, PtyError};
 
         let spawn = ChildCommand::new("cmd.exe")
             .spawn()

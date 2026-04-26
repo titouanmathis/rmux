@@ -341,7 +341,7 @@ pub fn connect_blocking(
 
 #[cfg(windows)]
 fn connect_retryable(error: &io::Error) -> bool {
-    error.kind() == io::ErrorKind::NotFound || error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32)
+    error.raw_os_error() == Some(ERROR_PIPE_BUSY as i32)
 }
 
 #[cfg(windows)]

@@ -10,3 +10,11 @@ rmux-types = { path = "../rmux-types" }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.185"
 rustix = { version = "1.1.4", features = ["process", "termios", "pty", "fs"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+tokio = { version = "1.52.1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_System_Threading",
+] }

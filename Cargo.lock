@@ -437,6 +437,8 @@ dependencies = [
  "libc",
  "rmux-types",
  "rustix",
+ "tokio",
+ "windows-sys",
 ]
 
 [[package]]

@@ -9,6 +9,7 @@ use rmux_core::{
 #[path = "input_keys/mouse.rs"]
 mod mouse;
 
+#[cfg_attr(windows, allow(unused_imports))]
 pub(crate) use self::mouse::{decode_mouse, encode_mouse_event, MouseDecode, MouseForwardEvent};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

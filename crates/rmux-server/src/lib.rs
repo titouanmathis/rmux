@@ -30,11 +30,12 @@ mod handler_support;
 mod hook_compat;
 #[cfg(unix)]
 mod hook_runtime;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod input_keys;
 #[cfg(unix)]
 mod key_table;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
+#[cfg_attr(windows, allow(dead_code))]
 mod keys;
 #[cfg(unix)]
 mod listener;

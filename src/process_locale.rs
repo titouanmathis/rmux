@@ -1,7 +1,10 @@
-use std::ffi::{CStr, CString};
+#[cfg(unix)]
+use std::ffi::CStr;
+use std::ffi::CString;
 
 // SAFETY: This declares libc's process-global timezone refresh entrypoint.
 // Calls are wrapped in `LibcLocaleBackend::tzset`.
+#[cfg(unix)]
 unsafe extern "C" {
     fn tzset();
 }
@@ -52,6 +55,7 @@ impl LocaleBackend for LibcLocaleBackend {
         setlocale(libc::LC_CTYPE, "")
     }
 
+    #[cfg(unix)]
     fn codeset(&self) -> Option<String> {
         // SAFETY: `nl_langinfo(CODESET)` returns either null or a pointer to a
         // process-owned NUL-terminated string for the active locale.
@@ -68,18 +72,33 @@ impl LocaleBackend for LibcLocaleBackend {
         )
     }
 
+    #[cfg(windows)]
+    fn codeset(&self) -> Option<String> {
+        Some("UTF-8".to_owned())
+    }
+
     fn set_time_from_environment(&self) {
         let _ = setlocale(libc::LC_TIME, "");
     }
 
+    #[cfg(unix)]
     fn tzset(&self) {
         // SAFETY: `tzset` updates libc process-global timezone state and takes
         // no pointers or Rust-owned resources.
         unsafe { tzset() }
     }
+
+    #[cfg(windows)]
+    fn tzset(&self) {}
 }
 
 fn setlocale(category: libc::c_int, locale: &str) -> bool {
+    #[cfg(windows)]
+    let locale = match locale {
+        "en_US.UTF-8" | "C.UTF-8" => ".UTF-8",
+        other => other,
+    };
+
     let Ok(locale) = CString::new(locale) else {
         return false;
     };

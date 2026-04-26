@@ -1,9 +1,9 @@
 //! Blocking Unix-socket transport for detached RPC traffic.
 
 use std::ffi::OsStr;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::ffi::OsString;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::fs;
 use std::io::{self, Read, Write};
 #[cfg(all(test, unix))]
@@ -24,9 +24,9 @@ const READ_BUFFER_SIZE: usize = 8192;
 /// reads.
 const SOCKET_IO_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 const FALLBACK_SOCKET_ROOT: &str = "/tmp";
-#[cfg(test)]
+#[cfg(all(test, unix))]
 const SOCKET_DIR_PREFIX: &str = "rmux";
 
 /// Computes the default RMUX client socket path.

@@ -357,6 +357,6 @@ fn binary_override_enabled_for_tests() -> bool {
         && env::var_os(BINARY_OVERRIDE_TEST_OPT_IN_ENV).is_some_and(|value| value == "1")
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "auto_start/tests.rs"]
 mod tests;

@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use std::error::Error;
 use std::os::unix::net::UnixStream;
 use std::panic::{catch_unwind, AssertUnwindSafe};

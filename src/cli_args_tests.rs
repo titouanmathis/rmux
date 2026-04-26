@@ -1,7 +1,6 @@
 use super::parse;
 use clap::{ArgAction, CommandFactory};
 use std::collections::BTreeSet;
-use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 

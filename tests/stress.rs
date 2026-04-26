@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 mod common;
 #[path = "stress/support.rs"]
 mod support;

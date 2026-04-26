@@ -200,7 +200,7 @@ fn current_working_directory() -> Option<PathBuf> {
     std::env::current_dir().ok()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use std::io::{self, Read};
     use std::os::unix::net::UnixStream;

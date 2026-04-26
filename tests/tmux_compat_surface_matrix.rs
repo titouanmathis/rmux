@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 mod common;
 
 #[path = "tmux_compat_surface_matrix/attached_modes.rs"]

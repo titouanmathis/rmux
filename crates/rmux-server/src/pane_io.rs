@@ -9,6 +9,7 @@ use tokio::sync::{mpsc, watch};
 const READ_BUFFER_SIZE: usize = 8192;
 mod control;
 mod persistent_overlay;
+#[cfg(unix)]
 mod reader;
 mod types;
 mod wire;
@@ -24,6 +25,7 @@ use persistent_overlay::{
     persistent_overlay_replacement_pending, prime_persistent_overlay_barriers,
     replacement_persistent_overlay_frame, update_persistent_overlay_cache,
 };
+#[cfg(unix)]
 pub(crate) use reader::spawn_pane_output_reader;
 pub(crate) use types::{
     pane_output_channel, AttachControl, AttachTarget, HandleOutcome, LiveAttachInputContext,

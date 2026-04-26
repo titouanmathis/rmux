@@ -3,7 +3,10 @@ use std::io;
 
 use rmux_ipc::LocalStream;
 use rmux_proto::{encode_attach_message, AttachFrameDecoder, AttachMessage};
-use rmux_pty::{PtyIo, PtyMaster};
+#[cfg(unix)]
+use rmux_pty::PtyIo;
+use rmux_pty::PtyMaster;
+#[cfg(unix)]
 use tokio::io::unix::AsyncFd;
 use tokio::sync::broadcast;
 use tracing::warn;
@@ -33,6 +36,7 @@ pub(super) fn open_attach_target(target: AttachTarget) -> io::Result<OpenAttachT
     })
 }
 
+#[cfg(unix)]
 pub(super) fn open_pane_writer(pane_master: PtyMaster) -> io::Result<AsyncFd<PtyIo>> {
     let pane_writer = pane_master.into_io();
     pane_writer.set_nonblocking()?;
@@ -176,6 +180,7 @@ pub(super) async fn emit_exited_message(stream: &LocalStream) -> io::Result<()> 
     emit_attach_bytes(stream, b"[exited]\r\n").await
 }
 
+#[cfg(unix)]
 pub(super) async fn read_from_pane(
     pane_reader: &AsyncFd<PtyIo>,
     buffer: &mut [u8],

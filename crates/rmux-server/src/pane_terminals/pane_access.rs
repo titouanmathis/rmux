@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+#[cfg(unix)]
 use std::os::fd::BorrowedFd;
+#[cfg(unix)]
 use std::path::PathBuf;
 
 use rmux_core::PaneId;
@@ -146,6 +148,7 @@ impl HandlerState {
             .is_some()
     }
 
+    #[cfg(unix)]
     pub(crate) fn pane_master_fd(
         &self,
         session_name: &SessionName,
@@ -186,6 +189,7 @@ impl HandlerState {
             .pane_pid(&runtime_session_name, pane_id, window_index, pane_index)
     }
 
+    #[cfg(unix)]
     pub(crate) fn pane_tty_path_in_window(
         &self,
         session_name: &SessionName,

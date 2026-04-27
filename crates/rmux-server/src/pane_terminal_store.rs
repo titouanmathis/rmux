@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+#[cfg(unix)]
 use std::os::fd::BorrowedFd;
+#[cfg(unix)]
 use std::path::PathBuf;
 use std::process::ExitStatus;
 
@@ -146,6 +148,7 @@ impl PaneTerminalStore {
         Ok(())
     }
 
+    #[cfg(unix)]
     pub(super) fn pane_master_fd(
         &self,
         session_name: &SessionName,
@@ -277,6 +280,7 @@ impl PaneTerminalStore {
         Ok(terminal.pid())
     }
 
+    #[cfg(unix)]
     pub(super) fn pane_tty_path(
         &self,
         session_name: &SessionName,

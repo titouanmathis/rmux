@@ -60,7 +60,8 @@ mod pane_terminal_lookup;
 #[cfg(any(unix, windows))]
 #[cfg_attr(windows, allow(dead_code))]
 mod pane_terminal_process;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
+#[cfg_attr(windows, allow(dead_code))]
 mod pane_terminals;
 #[cfg(any(unix, windows))]
 #[cfg_attr(windows, allow(dead_code))]

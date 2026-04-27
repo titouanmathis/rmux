@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+#[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::process::ExitStatus;
 
@@ -6,10 +7,9 @@ use rmux_core::{PaneGeometry, PaneId, Utf8Config};
 use rmux_proto::{RmuxError, SessionName};
 use rmux_pty::PtyMaster;
 
-use crate::pane_io::{
-    pane_output_channel, spawn_pane_output_reader, PaneAlertCallback, PaneExitCallback,
-    PaneOutputSender,
-};
+#[cfg(unix)]
+use crate::pane_io::spawn_pane_output_reader;
+use crate::pane_io::{pane_output_channel, PaneAlertCallback, PaneExitCallback, PaneOutputSender};
 use crate::pane_terminal_lookup::{missing_pane_terminal, pane_id_for_target};
 use crate::pane_transcript::{PaneTranscript, SharedPaneTranscript};
 
@@ -31,10 +31,20 @@ impl PaneExitMetadata {
     fn from_exit_status(status: ExitStatus) -> Self {
         Self {
             status: status.code(),
-            signal: status.signal(),
+            signal: exit_signal(status),
             time: chrono::Local::now().timestamp(),
         }
     }
+}
+
+#[cfg(unix)]
+fn exit_signal(status: ExitStatus) -> Option<i32> {
+    status.signal()
+}
+
+#[cfg(windows)]
+fn exit_signal(_status: ExitStatus) -> Option<i32> {
+    None
 }
 
 #[derive(Debug, Default)]
@@ -246,6 +256,7 @@ impl HandlerState {
             let _ = dead_panes.remove(&pane_id);
         }
         self.clear_attached_submitted_line(session_name, pane_id);
+        #[cfg(unix)]
         spawn_pane_output_reader(
             session_name.clone(),
             pane_id,
@@ -256,6 +267,15 @@ impl HandlerState {
             pane_alert_callback,
             pane_exit_callback,
         );
+        #[cfg(windows)]
+        {
+            let _ = (
+                output_reader,
+                pane_alert_callback,
+                pane_exit_callback,
+                generation,
+            );
+        }
         Ok(())
     }
 
@@ -288,7 +308,7 @@ impl HandlerState {
             .entry(session_name.clone())
             .or_default()
             .insert(pane_id, transcript.clone());
-        let pane_output = self
+        let _pane_output = self
             .pane_outputs
             .entry(session_name.clone())
             .or_default()
@@ -300,16 +320,26 @@ impl HandlerState {
             let _ = dead_panes.remove(&pane_id);
         }
         self.clear_attached_submitted_line(session_name, pane_id);
+        #[cfg(unix)]
         spawn_pane_output_reader(
             session_name.clone(),
             pane_id,
             output_reader,
             transcript,
-            pane_output,
+            _pane_output,
             Some(generation),
             pane_alert_callback,
             pane_exit_callback,
         );
+        #[cfg(windows)]
+        {
+            let _ = (
+                output_reader,
+                pane_alert_callback,
+                pane_exit_callback,
+                generation,
+            );
+        }
         Ok(())
     }
 

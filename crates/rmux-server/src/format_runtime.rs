@@ -1,6 +1,5 @@
 use std::sync::OnceLock;
 
-#[cfg(unix)]
 use crate::pane_terminals::HandlerState;
 use chrono::Local;
 use rmux_core::formats::{render_template, FormatContext, FormatVariable, FormatVariables};
@@ -25,7 +24,6 @@ mod variables;
 
 pub(crate) struct RuntimeFormatContext<'a> {
     base: FormatContext,
-    #[cfg(unix)]
     state: Option<&'a HandlerState>,
     options: Option<&'a OptionStore>,
     environment: Option<&'a EnvironmentStore>,
@@ -44,7 +42,6 @@ impl<'a> RuntimeFormatContext<'a> {
     pub(crate) fn new(base: FormatContext) -> Self {
         Self {
             base,
-            #[cfg(unix)]
             state: None,
             options: None,
             environment: None,
@@ -60,7 +57,6 @@ impl<'a> RuntimeFormatContext<'a> {
         }
     }
 
-    #[cfg(unix)]
     pub(crate) fn with_state(mut self, state: &'a HandlerState) -> Self {
         self.options = Some(&state.options);
         self.environment = Some(&state.environment);

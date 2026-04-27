@@ -69,6 +69,18 @@ impl From<SourceFileRequest> for ParsedSourceFileCommand {
 }
 
 pub(super) fn default_config_paths() -> Vec<String> {
+    #[cfg(windows)]
+    {
+        windows_default_config_paths()
+    }
+    #[cfg(not(windows))]
+    {
+        unix_default_config_paths()
+    }
+}
+
+#[cfg(not(windows))]
+fn unix_default_config_paths() -> Vec<String> {
     let mut paths = Vec::new();
     let mut push_unique = |path: String| {
         if !paths.contains(&path) {
@@ -90,6 +102,38 @@ pub(super) fn default_config_paths() -> Vec<String> {
     paths
 }
 
+#[cfg(windows)]
+fn windows_default_config_paths() -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut push_unique = |path: PathBuf| {
+        let path = path.to_string_lossy().into_owned();
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    };
+
+    if let Some(xdg_config_home) = nonempty_env("XDG_CONFIG_HOME") {
+        push_unique(
+            PathBuf::from(xdg_config_home)
+                .join("rmux")
+                .join("rmux.conf"),
+        );
+    }
+    if let Some(userprofile) = nonempty_env("USERPROFILE") {
+        let userprofile = PathBuf::from(userprofile);
+        push_unique(userprofile.join(".tmux.conf"));
+        push_unique(userprofile.join(".rmux.conf"));
+    }
+    if let Some(appdata) = nonempty_env("APPDATA") {
+        push_unique(PathBuf::from(appdata).join("rmux").join("rmux.conf"));
+    }
+    if let Some(config_file) = nonempty_env("RMUX_CONFIG_FILE") {
+        push_unique(PathBuf::from(config_file));
+    }
+
+    paths
+}
+
 fn nonempty_env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|value| !value.is_empty())
 }
@@ -100,6 +144,11 @@ pub(super) fn source_inputs_for_path(
     quiet: bool,
     stdin: Option<&str>,
 ) -> Result<Vec<SourceInput>, RmuxError> {
+    #[cfg(windows)]
+    if is_windows_null_config_path(path) {
+        return Ok(Vec::new());
+    }
+
     if path == "-" {
         let Some(stdin) = stdin else {
             return Err(RmuxError::Server(
@@ -143,6 +192,11 @@ pub(super) fn source_inputs_for_path(
     }
 
     Ok(inputs)
+}
+
+#[cfg(windows)]
+fn is_windows_null_config_path(path: &str) -> bool {
+    path.eq_ignore_ascii_case("NUL")
 }
 
 fn glob_pattern_for_source_path(path: &str, cwd: Option<&Path>) -> String {

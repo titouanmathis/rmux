@@ -11,10 +11,11 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
 use rmux_ipc::LocalStream;
+use rmux_proto::SessionName;
 #[cfg(unix)]
 use rmux_proto::{
     format_exit_line, format_extended_output_line, format_guard_line, format_output_line,
-    format_pause_line, ControlGuardKind, SessionName, CONTROL_BUFFER_HIGH,
+    format_pause_line, ControlGuardKind, CONTROL_BUFFER_HIGH,
 };
 #[cfg(unix)]
 use tokio::io::{AsyncReadExt, WriteHalf};
@@ -23,7 +24,7 @@ use tokio::sync::{broadcast, mpsc, watch};
 #[cfg(unix)]
 use tokio::task::JoinHandle;
 
-#[cfg(unix)]
+#[cfg_attr(windows, allow(unused_imports))]
 pub(crate) use crate::control_mode::ControlModeUpgrade;
 #[cfg(unix)]
 use crate::daemon::ShutdownHandle;
@@ -50,7 +51,6 @@ impl ControlClientFlags {
 }
 
 #[derive(Debug, Clone)]
-#[cfg(unix)]
 pub(crate) enum ControlServerEvent {
     SessionChanged(Option<SessionName>),
     Refresh,
@@ -59,7 +59,6 @@ pub(crate) enum ControlServerEvent {
 }
 
 #[derive(Debug, Clone)]
-#[cfg(unix)]
 pub(crate) struct ControlCommandResult {
     pub(crate) stdout: Vec<u8>,
     pub(crate) error: Option<rmux_proto::RmuxError>,

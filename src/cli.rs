@@ -42,10 +42,11 @@ use rmux_client::{connect, ensure_server_running_with_config, resolve_socket_pat
 
 use crate::cli_args::parse;
 use crate::cli_response::{expect_command_output, expect_command_success};
+#[cfg(unix)]
+use client_commands::{attach_with_connection, run_switch_client_on_connection};
 use client_commands::{
-    attach_with_connection, client_terminal_context_from_cli, optional_client_flags,
-    run_control_mode, run_detach_client, run_list_clients, run_refresh_client, run_suspend_client,
-    run_switch_client, run_switch_client_on_connection,
+    client_terminal_context_from_cli, optional_client_flags, run_control_mode, run_detach_client,
+    run_list_clients, run_refresh_client, run_suspend_client, run_switch_client,
 };
 #[cfg(test)]
 use command_inventory::render_list_commands_line;

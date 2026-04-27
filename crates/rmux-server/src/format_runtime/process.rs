@@ -1,7 +1,6 @@
 #[cfg(unix)]
 use std::os::fd::BorrowedFd;
 
-#[cfg(unix)]
 use rmux_os::process;
 
 use super::RuntimeFormatContext;
@@ -26,7 +25,18 @@ impl RuntimeFormatContext<'_> {
 
     #[cfg(windows)]
     pub(super) fn pane_current_path(&self) -> Option<String> {
+        let profile_cwd = || {
+            let state = self.state?;
+            let session_name = self.session_name()?;
+            let window_index = self.window_index?;
+            let pane = self.pane?;
+            state
+                .pane_profile_in_window(session_name, window_index, pane.index())
+                .ok()
+                .map(|profile| profile.cwd().to_string_lossy().into_owned())
+        };
         self.pane_screen_path()
+            .or_else(profile_cwd)
             .or_else(|| self.environment_value_by_name("PWD"))
             .or_else(|| self.environment_value_by_name("USERPROFILE"))
     }
@@ -39,7 +49,32 @@ impl RuntimeFormatContext<'_> {
 
     #[cfg(windows)]
     pub(super) fn pane_current_command(&self) -> Option<String> {
-        None
+        let state = self.state?;
+        let session_name = self.session_name()?;
+        let window_index = self.window_index?;
+        let pane = self.pane?;
+        state
+            .pane_runtime_window_name_in_window(session_name, window_index, pane.index())
+            .ok()
+            .flatten()
+            .or_else(|| {
+                state
+                    .pane_pid_in_window(session_name, window_index, pane.index())
+                    .ok()
+                    .and_then(process::command_name)
+            })
+            .or_else(|| {
+                state
+                    .pane_profile_in_window(session_name, window_index, pane.index())
+                    .ok()
+                    .and_then(|profile| {
+                        profile
+                            .shell()
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .map(str::to_owned)
+                    })
+            })
     }
 
     #[cfg(unix)]

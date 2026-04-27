@@ -134,11 +134,12 @@ impl AlertKind {
 impl RequestHandler {
     pub(super) fn pane_alert_callback(&self) -> PaneAlertCallback {
         let handler = self.downgrade();
+        let runtime = tokio::runtime::Handle::current();
         std::sync::Arc::new(move |event: PaneAlertEvent| {
             let Some(handler) = handler.upgrade() else {
                 return;
             };
-            tokio::spawn(async move {
+            runtime.spawn(async move {
                 handler.handle_pane_alert_event(event).await;
             });
         })

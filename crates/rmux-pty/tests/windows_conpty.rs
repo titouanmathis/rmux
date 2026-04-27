@@ -1,5 +1,7 @@
 #![cfg(windows)]
 
+use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use rmux_pty::{ChildCommand, PtyMaster, PtyPair, TerminalSize};
@@ -37,6 +39,72 @@ fn conpty_spawn_reads_child_output_and_waits() -> Result<(), Box<dyn std::error:
         String::from_utf8_lossy(&output)
     );
     assert!(spawned.child_mut().try_wait()?.is_some());
+    Ok(())
+}
+
+#[test]
+fn conpty_interactive_cmd_accepts_written_input() -> Result<(), Box<dyn std::error::Error>> {
+    let mut spawned = ChildCommand::new("C:\\Windows\\System32\\cmd.exe")
+        .args(["/D", "/K"])
+        .size(TerminalSize::new(100, 30))
+        .spawn()?;
+
+    let io = spawned.master().try_clone_io()?;
+    let mut output = read_until_io(&io, b">", Duration::from_secs(2))?;
+    io.write_all(b"echo RMUX_INTERACTIVE_OK\r\n")?;
+    output.extend(read_until_io(
+        &io,
+        b"RMUX_INTERACTIVE_OK",
+        Duration::from_secs(2),
+    )?);
+
+    spawned.child().terminate_forcefully()?;
+    let _ = spawned.child_mut().wait()?;
+
+    assert!(
+        String::from_utf8_lossy(&output).contains("RMUX_INTERACTIVE_OK"),
+        "expected interactive marker in ConPTY output, got {:?}",
+        String::from_utf8_lossy(&output)
+    );
+    Ok(())
+}
+
+#[test]
+fn conpty_background_reader_receives_output_after_input() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut spawned = ChildCommand::new("C:\\Windows\\System32\\cmd.exe")
+        .args(["/D", "/K"])
+        .size(TerminalSize::new(100, 30))
+        .spawn()?;
+
+    let reader = spawned.master().try_clone_io()?;
+    let writer = spawned.master().try_clone_io()?;
+    let (tx, rx) = mpsc::channel();
+    let reader_thread = thread::spawn(move || {
+        let result = read_until_io(&reader, b"RMUX_BACKGROUND_OK", Duration::from_secs(4));
+        let _ = tx.send(
+            result
+                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                .map_err(|error| error.to_string()),
+        );
+    });
+
+    thread::sleep(Duration::from_millis(100));
+    writer.write_all(b"echo RMUX_BACKGROUND_OK\r\n")?;
+
+    let output = rx
+        .recv_timeout(Duration::from_secs(5))?
+        .map_err(std::io::Error::other)?;
+    spawned.child().terminate_forcefully()?;
+    let _ = spawned.child_mut().wait()?;
+    reader_thread
+        .join()
+        .map_err(|_| "background reader thread panicked")?;
+
+    assert!(
+        output.contains("RMUX_BACKGROUND_OK"),
+        "expected background reader marker in ConPTY output, got {output:?}"
+    );
     Ok(())
 }
 
@@ -112,6 +180,14 @@ fn read_until(
     timeout: Duration,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let io = master.try_clone_io()?;
+    read_until_io(&io, needle, timeout)
+}
+
+fn read_until_io(
+    io: &rmux_pty::PtyIo,
+    needle: &[u8],
+    timeout: Duration,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let deadline = Instant::now() + timeout;
     let mut output = Vec::new();
     let mut buffer = [0_u8; 4096];

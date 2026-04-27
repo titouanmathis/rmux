@@ -1,13 +1,15 @@
 use super::{parse_environment_assignments, spawn_hook_command, TerminalProfile};
 use rmux_core::{EnvironmentStore, OptionStore};
 use rmux_proto::{OptionName, ScopeSelector, SessionName, SetOptionMode};
+#[cfg(windows)]
+use rmux_pty::TerminalSize as PtyTerminalSize;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
 static UNIQUE_ID: AtomicUsize = AtomicUsize::new(0);
@@ -316,6 +318,54 @@ fn resolve_shell_path_prefers_default_shell_option_before_shell_env_fallback() {
     );
 }
 
+#[cfg(windows)]
+#[test]
+fn windows_interactive_cmd_starts_in_profile_cwd_and_accepts_input() -> Result<(), Box<dyn Error>> {
+    let environment = EnvironmentStore::new();
+    let options = OptionStore::new();
+    let session_name = SessionName::new("alpha").expect("valid session name");
+    let cwd = unique_directory("windows-interactive-cmd")?;
+    let profile = TerminalProfile::for_session(
+        &environment,
+        &options,
+        &session_name,
+        7,
+        temp_socket_path().as_path(),
+        true,
+        None,
+        Some(rmux_core::PaneId::new(3)),
+        Some(cwd.as_path()),
+    )?;
+
+    let (master, mut child) =
+        super::spawn_pane_process(PtyTerminalSize::new(100, 30), &profile, None)?;
+    let io = master.try_clone_io()?;
+    let cwd_marker = cwd.to_string_lossy().into_owned();
+    let mut output = read_until_io(&io, cwd_marker.as_bytes(), Duration::from_secs(3))?;
+
+    io.write_all(b"echo RMUX_WINDOWS_INTERACTIVE_OK\r\n")?;
+    output.extend(read_until_io(
+        &io,
+        b"RMUX_WINDOWS_INTERACTIVE_OK",
+        Duration::from_secs(3),
+    )?);
+
+    child.terminate_forcefully()?;
+    let _ = child.wait()?;
+    fs::remove_dir_all(&cwd)?;
+
+    let output = String::from_utf8_lossy(&output);
+    assert!(
+        output.contains(&cwd_marker),
+        "expected Windows shell prompt to start in {cwd_marker}, got {output:?}"
+    );
+    assert!(
+        output.contains("RMUX_WINDOWS_INTERACTIVE_OK"),
+        "expected Windows interactive input marker, got {output:?}"
+    );
+    Ok(())
+}
+
 #[test]
 fn parse_environment_assignments_rejects_missing_equals() {
     let error = parse_environment_assignments(&["INVALID".to_owned()])
@@ -336,6 +386,13 @@ fn unique_output_path(label: &str) -> PathBuf {
     ));
     let _ = fs::remove_file(&path);
     path
+}
+
+#[cfg(windows)]
+fn unique_directory(label: &str) -> io::Result<PathBuf> {
+    let path = unique_output_path(label);
+    fs::create_dir_all(&path)?;
+    Ok(path)
 }
 
 fn temp_socket_path() -> PathBuf {
@@ -424,4 +481,28 @@ async fn wait_for_file_contents(path: &Path, expected: &str) -> Result<(), Box<d
         path.display()
     ))
     .into())
+}
+
+#[cfg(windows)]
+fn read_until_io(
+    io: &rmux_pty::PtyIo,
+    needle: &[u8],
+    timeout: Duration,
+) -> Result<Vec<u8>, Box<dyn Error>> {
+    let deadline = Instant::now() + timeout;
+    let mut output = Vec::new();
+    let mut buffer = [0_u8; 4096];
+
+    while Instant::now() < deadline {
+        let bytes_read = io.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        output.extend_from_slice(&buffer[..bytes_read]);
+        if output.windows(needle.len()).any(|window| window == needle) {
+            return Ok(output);
+        }
+    }
+
+    Ok(output)
 }

@@ -244,10 +244,7 @@ fn shell_child_command(profile: &TerminalProfile, command: &str) -> ChildCommand
             .arg("/D")
             .arg("/S")
             .arg("/C")
-            .arg(format!(
-                "cd /d {} && {command}",
-                cmd_double_quoted(profile.cwd())
-            )),
+            .arg(command),
         WindowsShellKind::Other => ChildCommand::new(profile.shell()).arg("/C").arg(command),
     }
 }
@@ -262,10 +259,7 @@ fn interactive_shell_child_command(profile: &TerminalProfile) -> ChildCommand {
                 "Set-Location -LiteralPath {}",
                 powershell_single_quoted(profile.cwd())
             )),
-        WindowsShellKind::Cmd => ChildCommand::new(profile.shell())
-            .arg("/D")
-            .arg("/K")
-            .arg(format!("cd /d {}", cmd_double_quoted(profile.cwd()))),
+        WindowsShellKind::Cmd => ChildCommand::new(profile.shell()).arg("/D").arg("/K"),
         WindowsShellKind::Other => ChildCommand::new(profile.shell()),
     }
 }
@@ -294,11 +288,6 @@ fn windows_shell_kind(shell: &Path) -> WindowsShellKind {
 #[cfg(windows)]
 fn powershell_single_quoted(path: &Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', "''"))
-}
-
-#[cfg(windows)]
-fn cmd_double_quoted(path: &Path) -> String {
-    format!("\"{}\"", path.to_string_lossy().replace('"', "\"\""))
 }
 
 #[cfg(unix)]

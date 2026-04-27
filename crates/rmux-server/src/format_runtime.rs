@@ -482,7 +482,6 @@ impl<'a> RuntimeFormatContext<'a> {
         None
     }
 
-    #[cfg(unix)]
     fn pane_pid(&self) -> Option<String> {
         let session_name = self.session_name()?;
         let window_index = self.window_index?;
@@ -491,11 +490,6 @@ impl<'a> RuntimeFormatContext<'a> {
             .pane_pid_in_window(session_name, window_index, pane.index())
             .ok()
             .map(|pid| pid.to_string())
-    }
-
-    #[cfg(windows)]
-    fn pane_pid(&self) -> Option<String> {
-        None
     }
 
     #[cfg(unix)]

@@ -179,6 +179,77 @@ async fn pane_alert_event_sets_bell_and_activity_flags_and_emits_alert_hooks() {
 }
 
 #[tokio::test]
+async fn pane_alert_callback_can_be_invoked_from_reader_thread() {
+    let handler = RequestHandler::new();
+    let session = create_session(&handler, "alerts-reader-thread").await;
+    set_option(
+        &handler,
+        ScopeSelector::Window(WindowTarget::with_window(session.clone(), 0)),
+        OptionName::MonitorActivity,
+        "on",
+    )
+    .await;
+    set_option(
+        &handler,
+        ScopeSelector::Session(session.clone()),
+        OptionName::ActivityAction,
+        "any",
+    )
+    .await;
+    let pane_id = {
+        let state = handler.state.lock().await;
+        state
+            .sessions
+            .session(&session)
+            .and_then(|session| session.window_at(0))
+            .and_then(|window| window.pane(0).map(|pane| pane.id()))
+            .expect("window pane exists")
+    };
+    let mut lifecycle = handler.subscribe_lifecycle_events();
+    let callback = handler.pane_alert_callback();
+
+    std::thread::spawn(move || {
+        callback(crate::pane_io::PaneAlertEvent {
+            session_name: session,
+            pane_id,
+            bell_count: 0,
+            generation: None,
+        });
+    })
+    .join()
+    .expect("reader-thread alert callback should not panic outside the Tokio runtime");
+
+    let event = recv_lifecycle(&mut lifecycle).await;
+    assert_eq!(event.hook_name, HookName::AlertActivity);
+}
+
+#[tokio::test]
+async fn pane_exit_callback_can_be_invoked_from_reader_thread() {
+    let handler = RequestHandler::new();
+    let session = create_session(&handler, "exit-reader-thread").await;
+    let pane_id = {
+        let state = handler.state.lock().await;
+        state
+            .sessions
+            .session(&session)
+            .and_then(|session| session.window_at(0))
+            .and_then(|window| window.pane(0).map(|pane| pane.id()))
+            .expect("window pane exists")
+    };
+    let callback = handler.pane_exit_callback();
+
+    std::thread::spawn(move || {
+        callback(crate::pane_io::PaneExitEvent {
+            session_name: session,
+            pane_id,
+            generation: None,
+        });
+    })
+    .join()
+    .expect("reader-thread exit callback should not panic outside the Tokio runtime");
+}
+
+#[tokio::test]
 async fn pane_alert_event_updates_automatic_window_name_without_disabling_auto_rename() {
     let handler = RequestHandler::new();
     let session = create_session(&handler, "alerts-name").await;

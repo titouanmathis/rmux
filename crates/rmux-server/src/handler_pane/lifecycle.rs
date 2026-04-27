@@ -36,11 +36,12 @@ enum PaneExitPlan {
 impl RequestHandler {
     pub(in crate::handler) fn pane_exit_callback(&self) -> PaneExitCallback {
         let handler = self.downgrade();
+        let runtime = tokio::runtime::Handle::current();
         std::sync::Arc::new(move |event: PaneExitEvent| {
             let Some(handler) = handler.upgrade() else {
                 return;
             };
-            tokio::spawn(async move {
+            runtime.spawn(async move {
                 handler.handle_pane_exit_event(event).await;
             });
         })

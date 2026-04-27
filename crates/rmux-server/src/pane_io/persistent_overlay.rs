@@ -112,6 +112,55 @@ pub(super) fn accept_persistent_overlay_state(
     true
 }
 
+pub(super) fn take_pending_persistent_overlay_for_state(
+    attach_controls: Option<&mut mpsc::UnboundedReceiver<AttachControl>>,
+    deferred_controls: &mut VecDeque<AttachControl>,
+    expected_state_id: Option<u64>,
+    render_generation: u64,
+    current_overlay_generation: u64,
+) -> Option<OverlayFrame> {
+    let expected_state_id = expected_state_id?;
+    if let Some(control_rx) = attach_controls {
+        while let Ok(control) = control_rx.try_recv() {
+            deferred_controls.push_back(control);
+        }
+    }
+
+    let mut selected = None;
+    let mut retained = VecDeque::with_capacity(deferred_controls.len());
+    while let Some(control) = deferred_controls.pop_front() {
+        match control {
+            AttachControl::Overlay(overlay)
+                if selected.is_none()
+                    && overlay_matches_switch(
+                        &overlay,
+                        expected_state_id,
+                        render_generation,
+                        current_overlay_generation,
+                    ) =>
+            {
+                selected = Some(overlay);
+            }
+            other => retained.push_back(other),
+        }
+    }
+    *deferred_controls = retained;
+    selected
+}
+
+fn overlay_matches_switch(
+    overlay: &OverlayFrame,
+    expected_state_id: u64,
+    render_generation: u64,
+    current_overlay_generation: u64,
+) -> bool {
+    overlay.persistent
+        && !overlay.frame.is_empty()
+        && overlay.persistent_state_id == Some(expected_state_id)
+        && overlay.render_generation == render_generation
+        && overlay.overlay_generation >= current_overlay_generation
+}
+
 pub(super) fn update_persistent_overlay_cache(
     cache: &mut Option<Vec<u8>>,
     visible: &mut bool,
@@ -167,4 +216,53 @@ pub(super) fn persistent_overlay_replacement_pending(
         }
         _ => false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use crate::pane_io::{AttachControl, OverlayFrame};
+
+    use super::take_pending_persistent_overlay_for_state;
+
+    #[test]
+    fn pending_overlay_for_state_is_removed_for_frame_composition() {
+        let mut controls = VecDeque::from([
+            AttachControl::Write(b"before".to_vec()),
+            AttachControl::Overlay(OverlayFrame::persistent_with_state(
+                b"MENU".to_vec(),
+                2,
+                4,
+                9,
+            )),
+            AttachControl::Write(b"after".to_vec()),
+        ]);
+
+        let overlay = take_pending_persistent_overlay_for_state(None, &mut controls, Some(9), 2, 0)
+            .expect("matching overlay");
+
+        assert_eq!(overlay.frame, b"MENU");
+        assert_eq!(controls.len(), 2);
+        assert!(matches!(
+            controls.pop_front(),
+            Some(AttachControl::Write(_))
+        ));
+        assert!(matches!(
+            controls.pop_front(),
+            Some(AttachControl::Write(_))
+        ));
+    }
+
+    #[test]
+    fn pending_overlay_for_state_keeps_nonmatching_controls() {
+        let mut controls = VecDeque::from([AttachControl::Overlay(
+            OverlayFrame::persistent_with_state(b"OLD".to_vec(), 1, 4, 8),
+        )]);
+
+        let overlay = take_pending_persistent_overlay_for_state(None, &mut controls, Some(9), 2, 0);
+
+        assert!(overlay.is_none());
+        assert_eq!(controls.len(), 1);
+    }
 }

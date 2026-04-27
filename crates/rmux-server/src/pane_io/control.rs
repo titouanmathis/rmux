@@ -10,7 +10,7 @@ use super::persistent_overlay::{
     accept_persistent_overlay_state, advance_persistent_overlay_state, clear_then_base_frame,
     discard_stale_persistent_overlays, is_stale_persistent_switch,
     persistent_overlay_replacement_pending, replacement_persistent_overlay_frame,
-    update_persistent_overlay_cache,
+    take_pending_persistent_overlay_for_state, update_persistent_overlay_cache,
 };
 use super::types::{AttachControl, AttachTarget, OpenAttachTarget, OverlayFrame};
 use super::wire::{
@@ -143,11 +143,23 @@ pub(super) async fn apply_pending_attach_controls(
                     continue;
                 }
                 *render_generation = render_generation.saturating_add(1);
-                let replacement_frame = replacement_persistent_overlay_frame(
-                    persistent_overlay,
-                    *persistent_overlay_visible,
-                    next_target.as_ref(),
+                let pending_overlay = take_pending_persistent_overlay_for_state(
+                    Some(control_rx),
+                    deferred_controls,
+                    next_target.persistent_overlay_state_id,
+                    *render_generation,
+                    *overlay_generation,
                 );
+                let replacement_frame = pending_overlay
+                    .as_ref()
+                    .map(|overlay| overlay.frame.clone())
+                    .or_else(|| {
+                        replacement_persistent_overlay_frame(
+                            persistent_overlay,
+                            *persistent_overlay_visible,
+                            next_target.as_ref(),
+                        )
+                    });
                 let had_persistent_overlay =
                     *persistent_overlay_visible || persistent_overlay.is_some();
                 let stale_persistent_overlay_on_screen =
@@ -161,6 +173,9 @@ pub(super) async fn apply_pending_attach_controls(
                     persistent_overlay.take();
                     *persistent_overlay_visible = false;
                 }
+                if let Some(overlay) = pending_overlay.as_ref() {
+                    *overlay_generation = overlay.overlay_generation;
+                }
                 switch_attach_target(
                     stream,
                     current_target,
@@ -172,6 +187,13 @@ pub(super) async fn apply_pending_attach_controls(
                     replacement_frame.as_deref(),
                 )
                 .await?;
+                if let Some(overlay) = pending_overlay {
+                    update_persistent_overlay_cache(
+                        persistent_overlay,
+                        persistent_overlay_visible,
+                        &overlay,
+                    );
+                }
                 *persistent_overlay_state_id = current_target.persistent_overlay_state_id;
                 if let Some(barrier_state_id) = *persistent_overlay_state_id {
                     discard_stale_persistent_overlays(

@@ -3,6 +3,8 @@ use rmux_ipc::LocalStream;
 #[cfg(any(unix, windows))]
 use rmux_proto::{AttachFrameDecoder, AttachMessage};
 #[cfg(any(unix, windows))]
+use std::future::pending;
+#[cfg(any(unix, windows))]
 use std::sync::atomic::{AtomicBool, AtomicU64};
 #[cfg(any(unix, windows))]
 use std::sync::Arc;
@@ -17,6 +19,7 @@ const READ_BUFFER_SIZE: usize = 8192;
 mod control;
 mod persistent_overlay;
 mod reader;
+mod refresh_scheduler;
 mod types;
 mod wire;
 
@@ -31,11 +34,14 @@ use persistent_overlay::{
     accept_persistent_overlay_state, advance_persistent_overlay_state, clear_then_base_frame,
     discard_stale_persistent_overlays, is_stale_persistent_switch,
     persistent_overlay_replacement_pending, prime_persistent_overlay_barriers,
-    replacement_persistent_overlay_frame, update_persistent_overlay_cache,
+    replacement_persistent_overlay_frame, take_pending_persistent_overlay_for_state,
+    update_persistent_overlay_cache,
 };
 #[cfg(windows)]
 pub(crate) use reader::spawn_pane_exit_watcher;
 pub(crate) use reader::spawn_pane_output_reader;
+#[cfg(any(unix, windows))]
+use refresh_scheduler::AttachRefreshScheduler;
 #[cfg(any(unix, windows))]
 pub(crate) use types::LiveAttachInputContext;
 #[cfg_attr(windows, allow(unused_imports))]
@@ -50,6 +56,15 @@ use wire::{
     open_attach_target, read_socket_bytes, recv_pane_output_optional, try_read_socket_bytes,
     TrySocketRead,
 };
+
+#[cfg(any(unix, windows))]
+async fn wait_for_refresh_deadline(deadline: Option<tokio::time::Instant>) {
+    if let Some(deadline) = deadline {
+        tokio::time::sleep_until(deadline).await;
+    } else {
+        pending::<()>().await;
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 #[cfg(any(unix, windows))]
@@ -75,6 +90,7 @@ pub(crate) async fn forward_attach(
     let mut persistent_overlay = None::<Vec<u8>>;
     let mut persistent_overlay_visible = false;
     let mut persistent_overlay_state_id = current_target.persistent_overlay_state_id;
+    let mut pane_refresh = AttachRefreshScheduler::default();
     let mut locked = false;
     decoder.push_bytes(&initial_socket_bytes);
     emit_attach_bytes(
@@ -174,6 +190,65 @@ pub(crate) async fn forward_attach(
                     let _ = emit_attach_stop(&stream, &current_target).await;
                     return Ok(());
                 }
+                _ = wait_for_refresh_deadline(pane_refresh.deadline()) => {
+                    pane_refresh.clear();
+                    if closing.load(Ordering::SeqCst) {
+                        let _ = emit_attach_stop(&stream, &current_target).await;
+                        return Ok(());
+                    }
+                    match apply_pending_attach_controls(
+                        &mut deferred_controls,
+                        attach_controls.as_mut(),
+                        &mut current_target,
+                        &stream,
+                        &mut render_generation,
+                        &mut overlay_generation,
+                        &mut persistent_overlay,
+                        &mut persistent_overlay_visible,
+                        &mut persistent_overlay_state_id,
+                        &mut locked,
+                    )
+                    .await?
+                    {
+                        PendingAttachAction::Exit => {
+                            return Ok(());
+                        }
+                        PendingAttachAction::Continue => continue,
+                        PendingAttachAction::Write => {
+                            if locked {
+                                continue;
+                            }
+                            if closing.load(Ordering::SeqCst) {
+                                let _ = emit_attach_stop(&stream, &current_target).await;
+                                return Ok(());
+                            }
+                            loop {
+                                match try_read_socket_bytes(
+                                    &stream,
+                                    &mut decoder,
+                                    &mut socket_read_buffer,
+                                )? {
+                                    TrySocketRead::Read => {}
+                                    TrySocketRead::Closed => return Ok(()),
+                                    TrySocketRead::WouldBlock => break,
+                                }
+                            }
+                            process_socket_messages(
+                                &mut decoder,
+                                &stream,
+                                &live_input,
+                                &mut pending_input,
+                                &mut locked,
+                            )
+                            .await?;
+                            let session_name = current_target.session_name.clone();
+                            live_input
+                                .handler
+                                .refresh_attached_session(&session_name)
+                                .await;
+                        }
+                    }
+                }
                 result = read_socket_bytes(&stream, &mut decoder, &mut socket_read_buffer) => {
                     if !result? {
                         return Ok(());
@@ -210,11 +285,23 @@ pub(crate) async fn forward_attach(
                             }
                             render_generation = render_generation.saturating_add(1);
                             pending_input.clear();
-                            let replacement_frame = replacement_persistent_overlay_frame(
-                                &persistent_overlay,
-                                persistent_overlay_visible,
-                                next_target.as_ref(),
+                            let pending_overlay = take_pending_persistent_overlay_for_state(
+                                attach_controls.as_mut(),
+                                &mut deferred_controls,
+                                next_target.persistent_overlay_state_id,
+                                render_generation,
+                                overlay_generation,
                             );
+                            let replacement_frame = pending_overlay
+                                .as_ref()
+                                .map(|overlay| overlay.frame.clone())
+                                .or_else(|| {
+                                    replacement_persistent_overlay_frame(
+                                        &persistent_overlay,
+                                        persistent_overlay_visible,
+                                        next_target.as_ref(),
+                                    )
+                                });
                             let had_persistent_overlay =
                                 persistent_overlay_visible || persistent_overlay.is_some();
                             let stale_persistent_overlay_on_screen =
@@ -229,6 +316,9 @@ pub(crate) async fn forward_attach(
                                 persistent_overlay.take();
                                 persistent_overlay_visible = false;
                             }
+                            if let Some(overlay) = pending_overlay.as_ref() {
+                                overlay_generation = overlay.overlay_generation;
+                            }
                             switch_attach_target(
                                 &stream,
                                 &mut current_target,
@@ -240,6 +330,13 @@ pub(crate) async fn forward_attach(
                                 replacement_frame.as_deref(),
                             )
                             .await?;
+                            if let Some(overlay) = pending_overlay {
+                                update_persistent_overlay_cache(
+                                    &mut persistent_overlay,
+                                    &mut persistent_overlay_visible,
+                                    &overlay,
+                                );
+                            }
                             persistent_overlay_state_id = current_target.persistent_overlay_state_id;
                             if let Some(barrier_state_id) = persistent_overlay_state_id {
                                 discard_stale_persistent_overlays(
@@ -373,11 +470,7 @@ pub(crate) async fn forward_attach(
                                 &mut locked,
                             )
                             .await?;
-                            let session_name = current_target.session_name.clone();
-                            live_input
-                                .handler
-                                .refresh_attached_session(&session_name)
-                                .await;
+                            pane_refresh.schedule_now();
                         }
                     }
                 }

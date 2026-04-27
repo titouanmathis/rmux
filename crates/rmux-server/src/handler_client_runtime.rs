@@ -382,7 +382,29 @@ pub(in crate::handler) fn effective_client_terminal_context(
 ) -> rmux_proto::ClientTerminalContext {
     let mut client_terminal = client_terminal.clone();
     client_terminal.utf8 |= client_environment_infers_utf8(client_environment);
+    if client_environment_is_windows_terminal(client_environment) {
+        push_unique_terminal_feature(&mut client_terminal.terminal_features, "sync");
+    }
     client_terminal
+}
+
+fn client_environment_is_windows_terminal(
+    client_environment: Option<&HashMap<String, String>>,
+) -> bool {
+    client_environment.is_some_and(|client_environment| {
+        client_environment
+            .get("WT_SESSION")
+            .is_some_and(|value| !value.is_empty())
+    })
+}
+
+fn push_unique_terminal_feature(features: &mut Vec<String>, feature: &str) {
+    if !features
+        .iter()
+        .any(|value| value.eq_ignore_ascii_case(feature))
+    {
+        features.push(feature.to_owned());
+    }
 }
 
 fn client_environment_infers_utf8(client_environment: Option<&HashMap<String, String>>) -> bool {
@@ -446,4 +468,38 @@ pub(in crate::handler) fn update_environment_from_client(
     state
         .environment
         .update(session_name, &patterns, client_environment);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use rmux_proto::ClientTerminalContext;
+
+    use super::effective_client_terminal_context;
+
+    #[test]
+    fn windows_terminal_environment_enables_synchronized_rendering() {
+        let environment = HashMap::from([("WT_SESSION".to_owned(), "session-id".to_owned())]);
+        let context = effective_client_terminal_context(
+            Some(&environment),
+            &ClientTerminalContext::default(),
+        );
+
+        assert_eq!(context.terminal_features, vec!["sync"]);
+    }
+
+    #[test]
+    fn windows_terminal_sync_feature_is_not_duplicated() {
+        let environment = HashMap::from([("WT_SESSION".to_owned(), "session-id".to_owned())]);
+        let context = effective_client_terminal_context(
+            Some(&environment),
+            &ClientTerminalContext {
+                terminal_features: vec!["SYNC".to_owned()],
+                utf8: false,
+            },
+        );
+
+        assert_eq!(context.terminal_features, vec!["SYNC"]);
+    }
 }

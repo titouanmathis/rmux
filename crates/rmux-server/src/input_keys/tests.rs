@@ -532,6 +532,26 @@ fn vt10x_navigation_keys_match_tmux_standard_sequences() {
 }
 
 #[test]
+fn golden_standard_key_trace_for_navigation_and_modifiers() {
+    let keys = [
+        "Up", "Down", "Left", "Right", "Home", "End", "DC", "PageUp", "PageDown", "BTab", "F1",
+        "C-a", "M-a",
+    ];
+    let encoded = keys
+        .into_iter()
+        .flat_map(|key| {
+            encode_key(0, ExtendedKeyFormat::Xterm, parse_key(key))
+                .unwrap_or_else(|| panic!("{key} must encode"))
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        encoded,
+        b"\x1b[A\x1b[B\x1b[D\x1b[C\x1b[1~\x1b[4~\x1b[3~\x1b[5~\x1b[6~\x1b[Z\x1bOP\x01\x1ba"
+    );
+}
+
+#[test]
 fn vt10x_keypad_keys_follow_application_mode() {
     let kp1 = parse_key("KP1");
     assert_eq!(kp1 & KEYC_KEYPAD, KEYC_KEYPAD);

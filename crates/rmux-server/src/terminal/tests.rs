@@ -358,10 +358,7 @@ fn windows_interactive_cmd_starts_in_profile_cwd_and_accepts_input() -> Result<(
 
     let output = output?;
     let output = String::from_utf8_lossy(&output);
-    let unwrapped_output = output
-        .replace("\r\n", "")
-        .replace('\r', "")
-        .replace('\n', "");
+    let unwrapped_output = output.replace(['\r', '\n'], "");
     assert!(
         unwrapped_output.contains(&cwd_marker),
         "expected Windows shell command to start in {cwd_marker}, got {output:?}"

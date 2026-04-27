@@ -2,14 +2,14 @@
 
 use std::io::{self, Read, Write};
 use std::os::windows::io::AsRawHandle;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::thread;
 
 use rmux_ipc::BlockingLocalStream;
 use rmux_proto::{
     encode_attach_message, AttachFrameDecoder, AttachMessage, AttachedKeystroke, RmuxError,
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::mpsc;
 
 use crate::ClientError;
 
@@ -28,10 +28,18 @@ const READ_BUFFER_SIZE: usize = 8192;
 
 /// Runs the attach loop using the process stdin/stdout streams.
 pub fn attach_terminal(stream: BlockingLocalStream) -> std::result::Result<(), ClientError> {
+    attach_terminal_with_initial_bytes(stream, Vec::new())
+}
+
+/// Runs the attach loop using process stdin/stdout and pre-read stream bytes.
+pub fn attach_terminal_with_initial_bytes(
+    stream: BlockingLocalStream,
+    initial_bytes: Vec<u8>,
+) -> std::result::Result<(), ClientError> {
     let input = io::stdin();
     let output = io::stdout();
 
-    attach_with_stdio(stream, input, output)
+    attach_with_stdio(stream, initial_bytes, input, output)
 }
 
 /// Runs the attach loop with an explicit terminal handle.
@@ -48,11 +56,12 @@ where
     Input: Read + AsRawHandle + Send + 'static,
     Output: Write + Send + 'static,
 {
-    attach_with_stdio(stream, input, output)
+    attach_with_stdio(stream, Vec::new(), input, output)
 }
 
 fn attach_with_stdio<Input, Output>(
     stream: BlockingLocalStream,
+    initial_bytes: Vec<u8>,
     input: Input,
     output: Output,
 ) -> std::result::Result<(), ClientError>
@@ -65,6 +74,7 @@ where
     let screen_tracker = AttachScreenTracker::default();
     let result = drive_attach_stream_with_terminal_state(
         stream,
+        initial_bytes,
         &raw_terminal,
         &screen_tracker,
         input,
@@ -80,6 +90,7 @@ where
 
 fn drive_attach_stream_with_terminal_state<Input, Output>(
     mut stream: BlockingLocalStream,
+    initial_bytes: Vec<u8>,
     _raw_terminal: &RawTerminal,
     screen_tracker: &AttachScreenTracker,
     input: Input,
@@ -93,7 +104,7 @@ where
         write_attach_message(&mut stream, AttachMessage::Resize(size))?;
     }
 
-    drive_attach_stream_inner(stream, screen_tracker.clone(), input, output)
+    drive_attach_stream_inner(stream, initial_bytes, screen_tracker.clone(), input, output)
 }
 
 /// Drives raw attach-stream byte forwarding over an upgraded local stream.
@@ -106,11 +117,18 @@ where
     Input: Read + AsRawHandle + Send + 'static,
     Output: Write + Send + 'static,
 {
-    drive_attach_stream_inner(stream, AttachScreenTracker::default(), input, output)
+    drive_attach_stream_inner(
+        stream,
+        Vec::new(),
+        AttachScreenTracker::default(),
+        input,
+        output,
+    )
 }
 
 fn drive_attach_stream_inner<Input, Output>(
     stream: BlockingLocalStream,
+    initial_bytes: Vec<u8>,
     screen_tracker: AttachScreenTracker,
     input: Input,
     output: Output,
@@ -119,13 +137,21 @@ where
     Input: Read + AsRawHandle + Send + 'static,
     Output: Write + Send + 'static,
 {
-    let mut input_stream = stream.try_clone().map_err(ClientError::Io)?;
-    let closed = Arc::new(AtomicBool::new(false));
-    let input_closed = Arc::clone(&closed);
-
-    let input_thread = thread::spawn(move || input_loop(&mut input_stream, input, input_closed));
-    let output_result = output_loop(stream, output, Arc::clone(&closed), screen_tracker);
-    closed.store(true, Ordering::SeqCst);
+    let (input_tx, input_rx) = mpsc::unbounded_channel();
+    let input_thread = thread::spawn(move || input_loop(input, input_tx));
+    let (pipe, runtime) = stream.into_async_parts();
+    let output_result = runtime.block_on(async {
+        let (reader, writer) = tokio::io::split(pipe);
+        drive_async_attach(
+            reader,
+            writer,
+            initial_bytes,
+            input_rx,
+            output,
+            screen_tracker,
+        )
+        .await
+    });
 
     if input_thread.is_finished() {
         join_attach_thread(input_thread)??;
@@ -135,9 +161,8 @@ where
 }
 
 fn input_loop<Input>(
-    stream: &mut BlockingLocalStream,
     mut input: Input,
-    closed: Arc<AtomicBool>,
+    input_tx: mpsc::UnboundedSender<Vec<u8>>,
 ) -> std::result::Result<(), ClientError>
 where
     Input: Read + AsRawHandle,
@@ -146,10 +171,10 @@ where
     let input_handle = input.as_raw_handle();
 
     loop {
-        if closed.load(Ordering::SeqCst) {
-            return Ok(());
-        }
         if !terminal::wait_for_input(input_handle, 50).map_err(ClientError::Io)? {
+            if input_tx.is_closed() {
+                return Ok(());
+            }
             continue;
         }
 
@@ -160,93 +185,146 @@ where
             Err(error) => return Err(ClientError::Io(error)),
         };
 
-        write_attach_message(
-            stream,
-            AttachMessage::Keystroke(AttachedKeystroke::new(read_buffer[..bytes_read].to_vec())),
-        )?;
+        if input_tx.send(read_buffer[..bytes_read].to_vec()).is_err() {
+            return Ok(());
+        }
     }
 }
 
-fn output_loop<Output>(
-    mut stream: BlockingLocalStream,
+async fn drive_async_attach<Reader, Writer, Output>(
+    mut reader: Reader,
+    mut writer: Writer,
+    initial_bytes: Vec<u8>,
+    mut input_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     mut output: Output,
-    closed: Arc<AtomicBool>,
     screen_tracker: AttachScreenTracker,
 ) -> std::result::Result<(), ClientError>
 where
+    Reader: tokio::io::AsyncRead + Unpin,
+    Writer: tokio::io::AsyncWrite + Unpin,
     Output: Write,
 {
     let mut decoder = AttachFrameDecoder::new();
+    decoder.push_bytes(&initial_bytes);
     let mut read_buffer = [0_u8; READ_BUFFER_SIZE];
     let mut stop_detector = AttachStopDetector::new(screen_tracker.clone());
 
     loop {
-        while let Some(message) = decoder.next_message().map_err(ClientError::from)? {
-            match message {
-                AttachMessage::Data(bytes) => {
-                    if contains_subslice(&bytes, ALT_SCREEN_EXIT_FALLBACK)
-                        || contains_subslice(&bytes, DETACHED_BANNER_PREFIX)
-                        || contains_subslice(&bytes, EXITED_BANNER)
-                    {
-                        screen_tracker.mark_stopped();
-                    }
-                    stop_detector.observe(&bytes);
-                    output.write_all(&bytes).map_err(ClientError::Io)?;
-                    output.flush().map_err(ClientError::Io)?;
-                }
-                AttachMessage::KeyDispatched(_) => {}
-                AttachMessage::DetachKill | AttachMessage::DetachExec(_) => {
-                    closed.store(true, Ordering::SeqCst);
-                    return Ok(());
-                }
-                AttachMessage::Lock(_) | AttachMessage::Suspend => {
-                    write_attach_message(&mut stream, AttachMessage::Unlock)?;
-                }
-                AttachMessage::Resize(_) => {
-                    return Err(ClientError::Protocol(RmuxError::Decode(
-                        "received unexpected resize message from attach stream".to_owned(),
-                    )));
-                }
-                AttachMessage::Unlock => {
-                    return Err(ClientError::Protocol(RmuxError::Decode(
-                        "received unexpected unlock message from attach stream".to_owned(),
-                    )));
-                }
-                AttachMessage::Keystroke(_) => {
-                    return Err(ClientError::Protocol(RmuxError::Decode(
-                        "received unexpected keystroke message from attach stream".to_owned(),
-                    )));
-                }
-            }
+        if drain_attach_messages(
+            &mut decoder,
+            &mut writer,
+            &mut output,
+            &screen_tracker,
+            &mut stop_detector,
+        )
+        .await?
+        .should_exit()
+        {
+            return Ok(());
         }
 
-        let bytes_read = match stream.read(&mut read_buffer) {
-            Ok(0) => {
-                closed.store(true, Ordering::SeqCst);
-                if screen_tracker.was_stopped() {
-                    return Ok(());
+        tokio::select! {
+            bytes = input_rx.recv() => {
+                let Some(bytes) = bytes else {
+                    continue;
+                };
+                write_async_attach_message(
+                    &mut writer,
+                    AttachMessage::Keystroke(AttachedKeystroke::new(bytes)),
+                ).await?;
+            }
+            read = reader.read(&mut read_buffer) => {
+                let bytes_read = match read {
+                    Ok(0) => {
+                        if screen_tracker.was_stopped() {
+                            return Ok(());
+                        }
+                        return Err(ClientError::Io(io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            "attach stream closed before attach-stop sequence",
+                        )));
+                    }
+                    Ok(bytes_read) => bytes_read,
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(error)
+                        if screen_tracker.was_stopped()
+                            && matches!(
+                                error.kind(),
+                                io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe
+                            ) =>
+                    {
+                        return Ok(());
+                    }
+                    Err(error) => return Err(ClientError::Io(error)),
+                };
+                decoder.push_bytes(&read_buffer[..bytes_read]);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DrainOutcome {
+    Continue,
+    Exit,
+}
+
+impl DrainOutcome {
+    const fn should_exit(self) -> bool {
+        matches!(self, Self::Exit)
+    }
+}
+
+async fn drain_attach_messages<Writer, Output>(
+    decoder: &mut AttachFrameDecoder,
+    writer: &mut Writer,
+    output: &mut Output,
+    screen_tracker: &AttachScreenTracker,
+    stop_detector: &mut AttachStopDetector,
+) -> std::result::Result<DrainOutcome, ClientError>
+where
+    Writer: tokio::io::AsyncWrite + Unpin,
+    Output: Write,
+{
+    while let Some(message) = decoder.next_message().map_err(ClientError::from)? {
+        match message {
+            AttachMessage::Data(bytes) => {
+                if contains_subslice(&bytes, ALT_SCREEN_EXIT_FALLBACK)
+                    || contains_subslice(&bytes, DETACHED_BANNER_PREFIX)
+                    || contains_subslice(&bytes, EXITED_BANNER)
+                {
+                    screen_tracker.mark_stopped();
                 }
-                return Err(ClientError::Io(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "attach stream closed before attach-stop sequence",
+                stop_detector.observe(&bytes);
+                output.write_all(&bytes).map_err(ClientError::Io)?;
+                output.flush().map_err(ClientError::Io)?;
+            }
+            AttachMessage::KeyDispatched(_) => {}
+            AttachMessage::DetachKill | AttachMessage::DetachExec(_) => {
+                return Ok(DrainOutcome::Exit);
+            }
+            AttachMessage::Lock(_) | AttachMessage::Suspend => {
+                write_async_attach_message(writer, AttachMessage::Unlock).await?;
+            }
+            AttachMessage::Resize(_) => {
+                return Err(ClientError::Protocol(RmuxError::Decode(
+                    "received unexpected resize message from attach stream".to_owned(),
                 )));
             }
-            Ok(bytes_read) => bytes_read,
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-            Err(error)
-                if screen_tracker.was_stopped()
-                    && matches!(
-                        error.kind(),
-                        io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe
-                    ) =>
-            {
-                return Ok(());
+            AttachMessage::Unlock => {
+                return Err(ClientError::Protocol(RmuxError::Decode(
+                    "received unexpected unlock message from attach stream".to_owned(),
+                )));
             }
-            Err(error) => return Err(ClientError::Io(error)),
-        };
-
-        decoder.push_bytes(&read_buffer[..bytes_read]);
+            AttachMessage::Keystroke(_) => {
+                return Err(ClientError::Protocol(RmuxError::Decode(
+                    "received unexpected keystroke message from attach stream".to_owned(),
+                )));
+            }
+        }
     }
+
+    Ok(DrainOutcome::Continue)
 }
 
 fn write_attach_message(
@@ -255,6 +333,17 @@ fn write_attach_message(
 ) -> std::result::Result<(), ClientError> {
     let frame = encode_attach_message(&message).map_err(ClientError::from)?;
     stream.write_all(&frame).map_err(ClientError::Io)
+}
+
+async fn write_async_attach_message<Writer>(
+    writer: &mut Writer,
+    message: AttachMessage,
+) -> std::result::Result<(), ClientError>
+where
+    Writer: tokio::io::AsyncWrite + Unpin,
+{
+    let frame = encode_attach_message(&message).map_err(ClientError::from)?;
+    writer.write_all(&frame).await.map_err(ClientError::Io)
 }
 
 fn join_attach_thread(

@@ -1,8 +1,9 @@
 use std::path::Path;
 
 use rmux_client::{
-    attach_terminal, connect, connect_or_absent, detect_context, drive_control_mode,
-    AttachTransition, ClientContext, ConnectResult, Connection, ControlTransition,
+    attach_terminal_with_initial_bytes, connect, connect_or_absent, detect_context,
+    drive_control_mode, AttachTransition, ClientContext, ConnectResult, Connection,
+    ControlTransition,
 };
 use rmux_proto::request::{
     AttachSessionExt2Request, DetachClientExtRequest, ListClientsRequest, RefreshClientRequest,
@@ -284,8 +285,9 @@ pub(super) fn attach_with_connection(
         .map_err(ExitFailure::from_client)?
     {
         AttachTransition::Upgraded(upgrade) => {
-            let stream = upgrade.into_stream();
-            attach_terminal(stream).map_err(ExitFailure::from_client)?;
+            let (stream, initial_bytes) = upgrade.into_parts();
+            attach_terminal_with_initial_bytes(stream, initial_bytes)
+                .map_err(ExitFailure::from_client)?;
             Ok(0)
         }
         AttachTransition::Rejected(response) => {

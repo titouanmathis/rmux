@@ -10,7 +10,7 @@ use rmux_proto::{
 };
 
 use crate::{
-    connection::{read_response_frame_exact, AttachTransition, Connection},
+    connection::{AttachTransition, Connection},
     ClientError,
 };
 
@@ -172,7 +172,7 @@ impl Connection {
     /// framing codec is no longer in the data path for the connection.
     pub fn begin_attach(mut self, target: SessionName) -> Result<AttachTransition, ClientError> {
         self.write_request(&Request::AttachSession(AttachSessionRequest { target }))?;
-        let response = read_response_frame_exact(self.stream_mut())?;
+        let response = self.read_response()?;
 
         match response {
             Response::AttachSession(response) => Ok(AttachTransition::Upgraded(
@@ -188,7 +188,7 @@ impl Connection {
         request: AttachSessionExtRequest,
     ) -> Result<AttachTransition, ClientError> {
         self.write_request(&Request::AttachSessionExt(request))?;
-        let response = read_response_frame_exact(self.stream_mut())?;
+        let response = self.read_response()?;
 
         match response {
             Response::AttachSession(response) => Ok(AttachTransition::Upgraded(
@@ -204,7 +204,7 @@ impl Connection {
         request: AttachSessionExt2Request,
     ) -> Result<AttachTransition, ClientError> {
         self.write_request(&Request::AttachSessionExt2(request))?;
-        let response = read_response_frame_exact(self.stream_mut())?;
+        let response = self.read_response()?;
 
         match response {
             Response::AttachSession(response) => Ok(AttachTransition::Upgraded(

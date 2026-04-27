@@ -44,11 +44,19 @@ const POLL_TIMEOUT: Timespec = Timespec {
 
 /// Runs the attach loop using the process stdin/stdout streams.
 pub fn attach_terminal(stream: UnixStream) -> std::result::Result<(), ClientError> {
+    attach_terminal_with_initial_bytes(stream, Vec::new())
+}
+
+/// Runs the attach loop using process stdin/stdout and pre-read stream bytes.
+pub fn attach_terminal_with_initial_bytes(
+    stream: UnixStream,
+    initial_bytes: Vec<u8>,
+) -> std::result::Result<(), ClientError> {
     let terminal = io::stdin();
     let input = io::stdin();
     let output = io::stdout();
 
-    attach_with_terminal(stream, &terminal, input, output)
+    attach_with_terminal_with_initial_bytes(stream, initial_bytes, &terminal, input, output)
 }
 
 /// Runs the attach loop with an explicit terminal file descriptor.
@@ -66,11 +74,27 @@ where
     Input: Read + AsFd + Send + 'static,
     Output: Write + Send + 'static,
 {
+    attach_with_terminal_with_initial_bytes(stream, Vec::new(), terminal, input, output)
+}
+
+fn attach_with_terminal_with_initial_bytes<Terminal, Input, Output>(
+    stream: UnixStream,
+    initial_bytes: Vec<u8>,
+    terminal: &Terminal,
+    input: Input,
+    output: Output,
+) -> std::result::Result<(), ClientError>
+where
+    Terminal: AsFd,
+    Input: Read + AsFd + Send + 'static,
+    Output: Write + Send + 'static,
+{
     let raw_terminal = RawTerminal::from_fd(terminal).map_err(ClientError::from)?;
     let _ = raw_terminal.flush_pending_input();
     let screen_tracker = AttachScreenTracker::default();
     let result = drive_attach_with_terminal_state(
         stream,
+        initial_bytes,
         terminal,
         &raw_terminal,
         &screen_tracker,
@@ -87,6 +111,7 @@ where
 
 fn drive_attach_with_terminal_state<Terminal, Input, Output>(
     stream: UnixStream,
+    initial_bytes: Vec<u8>,
     terminal: &Terminal,
     raw_terminal: &RawTerminal,
     screen_tracker: &AttachScreenTracker,
@@ -119,6 +144,7 @@ where
     let resize_watcher = ResizeWatcher::spawn(terminal_fd, resize_tx)?;
     let attach_result = drive_attach_stream_with_locking(
         stream,
+        initial_bytes,
         raw_terminal,
         screen_tracker,
         input,
@@ -142,6 +168,7 @@ where
 {
     drive_attach_stream_inner(
         stream,
+        Vec::new(),
         None,
         AttachScreenTracker::default(),
         input,
@@ -152,6 +179,7 @@ where
 
 fn drive_attach_stream_with_locking<Input, Output>(
     stream: UnixStream,
+    initial_bytes: Vec<u8>,
     raw_terminal: &RawTerminal,
     screen_tracker: &AttachScreenTracker,
     input: Input,
@@ -164,6 +192,7 @@ where
 {
     drive_attach_stream_inner(
         stream,
+        initial_bytes,
         Some(raw_terminal),
         screen_tracker.clone(),
         input,
@@ -174,6 +203,7 @@ where
 
 fn drive_attach_stream_inner<Input, Output>(
     stream: UnixStream,
+    initial_bytes: Vec<u8>,
     raw_terminal: Option<&RawTerminal>,
     screen_tracker: AttachScreenTracker,
     input: Input,
@@ -208,6 +238,7 @@ where
     let output_thread = thread::spawn(move || {
         output_loop(
             stream,
+            initial_bytes,
             output,
             output_closed,
             output_locked,
@@ -299,6 +330,7 @@ where
 
 fn output_loop<Output>(
     mut stream: UnixStream,
+    initial_bytes: Vec<u8>,
     mut output: Output,
     closed: Arc<AtomicBool>,
     locked: Arc<AtomicBool>,
@@ -309,6 +341,7 @@ where
     Output: Write,
 {
     let mut decoder = AttachFrameDecoder::new();
+    decoder.push_bytes(&initial_bytes);
     let mut read_buffer = [0_u8; READ_BUFFER_SIZE];
     let mut stop_detector = AttachStopDetector::new(screen_tracker.clone());
 

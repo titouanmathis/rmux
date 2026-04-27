@@ -14,8 +14,8 @@ use std::time::Duration;
 use crate::ClientError;
 use rmux_ipc::{connect_blocking, BlockingLocalStream, LocalEndpoint};
 use rmux_proto::{
-    decode_frame, encode_frame, AttachSessionResponse, ControlMode, ControlModeResponse,
-    FrameDecoder, Request, Response, RmuxError, DEFAULT_MAX_FRAME_LENGTH,
+    encode_frame, AttachSessionResponse, ControlMode, ControlModeResponse, FrameDecoder, Request,
+    Response,
 };
 
 /// Read buffer size for blocking socket reads.
@@ -117,6 +117,7 @@ pub enum ControlTransition {
 pub struct AttachSessionUpgrade {
     response: AttachSessionResponse,
     stream: BlockingLocalStream,
+    initial_bytes: Vec<u8>,
 }
 
 /// A detached connection that has transitioned into control-mode streaming.
@@ -137,6 +138,13 @@ impl AttachSessionUpgrade {
     #[must_use]
     pub fn into_stream(self) -> BlockingLocalStream {
         self.stream
+    }
+
+    /// Consumes the upgrade and returns the raw attach-stream socket plus any
+    /// bytes already read beyond the detached response frame.
+    #[must_use]
+    pub fn into_parts(self) -> (BlockingLocalStream, Vec<u8>) {
+        (self.stream, self.initial_bytes)
     }
 }
 
@@ -201,7 +209,7 @@ impl Connection {
         self.stream.write_all(&frame).map_err(ClientError::Io)
     }
 
-    fn read_response(&mut self) -> Result<Response, ClientError> {
+    pub(crate) fn read_response(&mut self) -> Result<Response, ClientError> {
         let mut buffer = [0u8; READ_BUFFER_SIZE];
 
         loop {
@@ -225,6 +233,7 @@ impl Connection {
         }
     }
 
+    #[cfg(unix)]
     pub(crate) fn stream_mut(&mut self) -> &mut BlockingLocalStream {
         &mut self.stream
     }
@@ -235,10 +244,12 @@ impl Connection {
     ) -> Result<AttachSessionUpgrade, ClientError> {
         set_read_timeout(&self.stream, None).map_err(ClientError::Io)?;
         set_write_timeout(&self.stream, None).map_err(ClientError::Io)?;
+        let initial_bytes = self.decoder.remaining_bytes().to_vec();
 
         Ok(AttachSessionUpgrade {
             response,
             stream: self.stream,
+            initial_bytes,
         })
     }
 
@@ -257,32 +268,26 @@ impl Connection {
     }
 }
 
+#[cfg(unix)]
 pub(crate) fn read_response_frame_exact(
     stream: &mut BlockingLocalStream,
 ) -> Result<Response, ClientError> {
-    let mut header = [0_u8; 4];
-    read_exact_or_eof(stream, &mut header)?;
+    let mut decoder = FrameDecoder::new();
+    let mut byte = [0_u8; 1];
 
-    let length = u32::from_le_bytes(header) as usize;
-    if length == 0 {
-        return Err(ClientError::Protocol(RmuxError::EmptyFrame));
+    loop {
+        match decoder.next_frame::<Response>() {
+            Ok(Some(response)) => return Ok(response),
+            Ok(None) => {}
+            Err(error) => return Err(ClientError::Protocol(error)),
+        }
+
+        read_exact_or_eof(stream, &mut byte)?;
+        decoder.push_bytes(&byte);
     }
-    if length > DEFAULT_MAX_FRAME_LENGTH {
-        return Err(ClientError::Protocol(RmuxError::FrameTooLarge {
-            length,
-            maximum: DEFAULT_MAX_FRAME_LENGTH,
-        }));
-    }
-
-    let mut payload = vec![0_u8; length];
-    read_exact_or_eof(stream, &mut payload)?;
-
-    let mut frame = Vec::with_capacity(4 + length);
-    frame.extend_from_slice(&header);
-    frame.extend_from_slice(&payload);
-    decode_frame(&frame).map_err(ClientError::Protocol)
 }
 
+#[cfg(unix)]
 fn read_exact_or_eof(
     stream: &mut BlockingLocalStream,
     buffer: &mut [u8],

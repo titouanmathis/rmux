@@ -24,7 +24,8 @@ pub mod control;
 pub mod nested;
 
 pub use attach::{
-    attach_terminal, attach_with_terminal, drive_attach_stream, AttachError, RawTerminal,
+    attach_terminal, attach_terminal_with_initial_bytes, attach_with_terminal, drive_attach_stream,
+    AttachError, RawTerminal,
 };
 pub use auto_start::{
     ensure_server_running, ensure_server_running_with_config, AutoStartConfig,

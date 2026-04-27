@@ -53,7 +53,7 @@ const STATUS_FORMAT_DEFAULT: &[&str] = &[STATUS_FORMAT1, STATUS_FORMAT2, STATUS_
 #[cfg(unix)]
 const DEFAULT_SHELL: &str = "/bin/bash";
 #[cfg(windows)]
-const DEFAULT_SHELL: &str = "cmd.exe";
+const DEFAULT_SHELL: &str = "";
 
 pub(super) const OPTIONS: &[OptionMetadata] = &[
     option(

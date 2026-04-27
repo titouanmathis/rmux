@@ -10,7 +10,6 @@ use rmux_proto::{
 };
 use std::path::Path;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::error::TryRecvError;
 use tokio::time::{timeout, Duration};
 
 fn session_name(value: &str) -> SessionName {

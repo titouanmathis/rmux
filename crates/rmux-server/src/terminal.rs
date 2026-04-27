@@ -1,10 +1,6 @@
 use std::collections::HashMap;
 #[cfg(windows)]
-use std::env;
-#[cfg(windows)]
 use std::ffi::OsString;
-#[cfg(unix)]
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -12,12 +8,12 @@ use std::process::{Command, Stdio};
 use rmux_core::{EnvironmentStore, OptionStore, PaneId};
 use rmux_proto::{OptionName, RmuxError, SessionName};
 use rmux_pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize as PtyTerminalSize};
-#[cfg(unix)]
-use rustix::process::getuid;
 use tokio::runtime::Handle;
 
+mod shell_resolver;
 mod shell_spec;
 
+use shell_resolver::resolve_shell_path;
 use shell_spec::ShellSpec;
 
 /// Immutable pane-spawn metadata captured when a pane terminal is created.
@@ -291,132 +287,6 @@ pub(crate) fn parse_environment_assignments(
     }
 
     Ok(environment)
-}
-
-fn resolve_shell_path(
-    options: &OptionStore,
-    session_name: Option<&SessionName>,
-    environment: &HashMap<String, String>,
-) -> PathBuf {
-    session_name
-        .and_then(|session_name| options.resolve(Some(session_name), OptionName::DefaultShell))
-        .or_else(|| options.resolve(None, OptionName::DefaultShell))
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .map(normalize_shell_path)
-        .or_else(current_user_login_shell)
-        .or_else(|| environment.get("SHELL").map(PathBuf::from))
-        .map(normalize_shell_path)
-        .unwrap_or_else(default_shell_path)
-}
-
-#[cfg(unix)]
-fn normalize_shell_path(path: PathBuf) -> PathBuf {
-    path
-}
-
-#[cfg(windows)]
-fn normalize_shell_path(path: PathBuf) -> PathBuf {
-    if path.components().count() > 1 {
-        return path;
-    }
-
-    find_shell_on_path(&path).unwrap_or(path)
-}
-
-#[cfg(windows)]
-fn find_shell_on_path(path: &Path) -> Option<PathBuf> {
-    let name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
-    if matches!(name.as_str(), "cmd" | "cmd.exe") {
-        return env::var_os("COMSPEC").map(PathBuf::from).or_else(|| {
-            env::var_os("SystemRoot")
-                .map(|root| PathBuf::from(root).join("System32").join("cmd.exe"))
-        });
-    }
-    if matches!(name.as_str(), "powershell" | "powershell.exe") {
-        return env::var_os("SystemRoot").map(|root| {
-            PathBuf::from(root)
-                .join("System32")
-                .join("WindowsPowerShell")
-                .join("v1.0")
-                .join("powershell.exe")
-        });
-    }
-
-    search_path(path)
-}
-
-#[cfg(windows)]
-fn search_path(path: &Path) -> Option<PathBuf> {
-    let path_value = env::var_os("PATH")?;
-    let extensions = executable_extensions(path);
-    for directory in env::split_paths(&path_value) {
-        for extension in &extensions {
-            let candidate = directory.join(format!("{}{}", path.to_string_lossy(), extension));
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    None
-}
-
-#[cfg(windows)]
-fn executable_extensions(path: &Path) -> Vec<String> {
-    if path.extension().is_some() {
-        return vec![String::new()];
-    }
-
-    env::var_os("PATHEXT")
-        .map(|value| {
-            value
-                .to_string_lossy()
-                .split(';')
-                .filter(|extension| !extension.is_empty())
-                .map(ToOwned::to_owned)
-                .collect::<Vec<_>>()
-        })
-        .filter(|extensions| !extensions.is_empty())
-        .unwrap_or_else(|| vec![".COM".to_owned(), ".EXE".to_owned(), ".BAT".to_owned()])
-}
-
-#[cfg(unix)]
-fn current_user_login_shell() -> Option<PathBuf> {
-    let uid = getuid().as_raw();
-    fs::read_to_string("/etc/passwd")
-        .ok()?
-        .lines()
-        .find_map(|line| passwd_shell_for_uid(line, uid))
-}
-
-#[cfg(windows)]
-fn current_user_login_shell() -> Option<PathBuf> {
-    None
-}
-
-#[cfg(unix)]
-fn passwd_shell_for_uid(line: &str, uid: u32) -> Option<PathBuf> {
-    let mut fields = line.split(':');
-    let _name = fields.next()?;
-    let _password = fields.next()?;
-    let parsed_uid = fields.next()?.parse::<u32>().ok()?;
-    let _gid = fields.next()?;
-    let _gecos = fields.next()?;
-    let _home = fields.next()?;
-    let shell = fields.next()?;
-    (parsed_uid == uid && !shell.is_empty()).then(|| PathBuf::from(shell))
-}
-
-#[cfg(unix)]
-fn default_shell_path() -> PathBuf {
-    PathBuf::from("/bin/sh")
-}
-
-#[cfg(windows)]
-fn default_shell_path() -> PathBuf {
-    std::env::var_os("COMSPEC")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("cmd.exe"))
 }
 
 fn resolve_working_directory(requested_cwd: Option<&Path>) -> Result<PathBuf, RmuxError> {

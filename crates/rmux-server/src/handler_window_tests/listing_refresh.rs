@@ -314,6 +314,7 @@ async fn window_mutations_refresh_attached_sessions() {
         Response::KillWindow(_)
     ));
     assert_refresh(control_rx.try_recv().expect("kill-window refresh"));
+    drain_attach_controls(&mut control_rx).await;
 
     assert!(matches!(
         handler
@@ -324,8 +325,10 @@ async fn window_mutations_refresh_attached_sessions() {
             .await,
         Response::ListWindows(_)
     ));
-    match control_rx.try_recv() {
-        Err(TryRecvError::Empty) => {}
-        other => panic!("list-windows should not refresh attached clients, got {other:?}"),
+    match timeout(Duration::from_millis(100), control_rx.recv()).await {
+        Err(_) | Ok(None) => {}
+        Ok(Some(control)) => {
+            panic!("list-windows should not refresh attached clients, got {control:?}")
+        }
     }
 }

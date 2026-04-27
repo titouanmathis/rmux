@@ -24,11 +24,36 @@ fn default_shell_window_name() -> String {
 
 #[cfg(windows)]
 fn default_shell_window_name() -> String {
+    if windows_command_exists("pwsh.exe") {
+        return "pwsh.exe".to_owned();
+    }
+    if windows_powershell_path().is_some_and(|path| path.is_file()) {
+        return "powershell.exe".to_owned();
+    }
     std::env::var_os("COMSPEC")
         .and_then(|shell| Path::new(&shell).file_name().map(|name| name.to_owned()))
         .map(|name| name.to_string_lossy().trim_start_matches('-').to_owned())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "cmd.exe".to_owned())
+}
+
+#[cfg(windows)]
+fn windows_command_exists(command: &str) -> bool {
+    let Some(path_value) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path_value).any(|directory| directory.join(command).is_file())
+}
+
+#[cfg(windows)]
+fn windows_powershell_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("SystemRoot").map(|root| {
+        std::path::PathBuf::from(root)
+            .join("System32")
+            .join("WindowsPowerShell")
+            .join("v1.0")
+            .join("powershell.exe")
+    })
 }
 
 async fn recv_overlay_control(

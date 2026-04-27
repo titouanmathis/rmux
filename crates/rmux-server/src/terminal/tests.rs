@@ -309,6 +309,7 @@ fn terminal_profile_runtime_window_name_tracks_spawned_command_shape() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn resolve_shell_path_prefers_default_shell_option_before_shell_env_fallback() {
     let options = OptionStore::new();
@@ -320,15 +321,94 @@ fn resolve_shell_path_prefers_default_shell_option_before_shell_env_fallback() {
 
     assert_eq!(
         resolved,
-        super::normalize_shell_path(PathBuf::from(expected))
+        super::shell_resolver::normalize_shell_path(PathBuf::from(expected))
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn resolve_shell_path_uses_powershell_family_as_windows_default() {
+    let options = OptionStore::new();
+    let environment = HashMap::from([("SHELL".to_owned(), "cmd.exe".to_owned())]);
+
+    let resolved = super::resolve_shell_path(&options, None, &environment);
+    let leaf = super::executable_name(resolved.as_os_str())
+        .expect("resolved shell has a leaf")
+        .to_ascii_lowercase();
+
+    assert!(
+        matches!(
+            leaf.as_str(),
+            "pwsh.exe" | "pwsh" | "powershell.exe" | "powershell"
+        ),
+        "expected Windows default shell to be PowerShell-family, got {resolved:?}"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn resolve_shell_path_respects_explicit_windows_cmd_default_shell() {
+    let mut options = OptionStore::new();
+    options
+        .set(
+            ScopeSelector::Global,
+            OptionName::DefaultShell,
+            "cmd.exe".to_owned(),
+            SetOptionMode::Replace,
+        )
+        .expect("default-shell succeeds");
+
+    let resolved = super::resolve_shell_path(&options, None, &HashMap::new());
+    let leaf = super::executable_name(resolved.as_os_str())
+        .expect("resolved shell has a leaf")
+        .to_ascii_lowercase();
+
+    assert_eq!(leaf, "cmd.exe");
+}
+
+#[cfg(windows)]
+#[test]
+fn resolve_shell_path_prefers_session_shell_over_global_on_windows() {
+    let mut options = OptionStore::new();
+    let session_name = SessionName::new("alpha").expect("valid session name");
+    options
+        .set(
+            ScopeSelector::Global,
+            OptionName::DefaultShell,
+            "powershell.exe".to_owned(),
+            SetOptionMode::Replace,
+        )
+        .expect("global default-shell succeeds");
+    options
+        .set(
+            ScopeSelector::Session(session_name.clone()),
+            OptionName::DefaultShell,
+            "cmd.exe".to_owned(),
+            SetOptionMode::Replace,
+        )
+        .expect("session default-shell succeeds");
+
+    let resolved = super::resolve_shell_path(&options, Some(&session_name), &HashMap::new());
+    let leaf = super::executable_name(resolved.as_os_str())
+        .expect("resolved shell has a leaf")
+        .to_ascii_lowercase();
+
+    assert_eq!(leaf, "cmd.exe");
 }
 
 #[cfg(windows)]
 #[test]
 fn windows_interactive_cmd_starts_in_profile_cwd_and_accepts_input() -> Result<(), Box<dyn Error>> {
     let environment = EnvironmentStore::new();
-    let options = OptionStore::new();
+    let mut options = OptionStore::new();
+    options
+        .set(
+            ScopeSelector::Global,
+            OptionName::DefaultShell,
+            "cmd.exe".to_owned(),
+            SetOptionMode::Replace,
+        )
+        .expect("default-shell succeeds");
     let session_name = SessionName::new("alpha").expect("valid session name");
     let cwd = unique_directory("windows-interactive-cmd")?;
     let profile = TerminalProfile::for_session(

@@ -67,3 +67,22 @@ fn path_redaction_replaces_home_prefix() {
 
     assert_eq!(redact_path(&home.join("rmux.conf")), "~/rmux.conf");
 }
+
+#[cfg(windows)]
+#[test]
+fn detected_shell_reports_the_windows_default_pane_shell() {
+    let _guard = ENV_LOCK.lock().expect("env lock");
+    let _path = EnvVarGuard::capture("PATH");
+    let _comspec = EnvVarGuard::capture("COMSPEC");
+    let root = std::env::temp_dir().join(format!("rmux-diagnose-shell-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("temp shell dir");
+    let pwsh = root.join("pwsh.exe");
+    std::fs::write(&pwsh, b"").expect("fake pwsh");
+    std::env::set_var("PATH", &root);
+    std::env::set_var("COMSPEC", r"C:\Windows\System32\cmd.exe");
+
+    assert_eq!(detected_shell(), pwsh.to_string_lossy());
+
+    std::fs::remove_dir_all(root).expect("remove temp shell dir");
+}

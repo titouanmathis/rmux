@@ -272,8 +272,8 @@ fn split_utf8_echo_command() -> SplitUtf8EchoCommand {
 #[cfg(windows)]
 fn split_utf8_echo_command() -> SplitUtf8EchoCommand {
     SplitUtf8EchoCommand {
-        chunks: vec![b"echo cafe \xe6", b"\x96", b"\x87\r"],
+        chunks: vec![b"Write-Output 'cafe \xe6", b"\x96", b"\x87'\r"],
         output_needle: "\ncafe 文",
-        echoed_command: "echo cafe 文",
+        echoed_command: "Write-Output 'cafe 文'",
     }
 }

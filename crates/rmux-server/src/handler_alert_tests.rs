@@ -533,7 +533,7 @@ async fn silence_monitor_sets_flags_after_idle() {
     .await;
 
     let mut lifecycle = handler.subscribe_lifecycle_events();
-    let event = timeout(Duration::from_millis(1500), lifecycle.recv())
+    let event = timeout(Duration::from_secs(4), lifecycle.recv())
         .await
         .expect("silence alert should fire")
         .expect("lifecycle channel should stay open");

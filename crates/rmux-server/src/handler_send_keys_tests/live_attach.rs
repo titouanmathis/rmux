@@ -288,6 +288,49 @@ async fn live_attach_bracketed_paste_preserves_multiline_special_payload() {
 }
 
 #[tokio::test]
+async fn live_attach_committed_utf8_text_preserves_latin_and_ime_payload_chunks() {
+    let handler = RequestHandler::new();
+    let alpha = session_name("alpha");
+    let requester_pid = std::process::id();
+
+    let created = handler
+        .handle(Request::NewSession(NewSessionRequest {
+            session_name: alpha.clone(),
+            detached: true,
+            size: Some(TerminalSize { cols: 80, rows: 24 }),
+            environment: None,
+        }))
+        .await;
+    assert!(matches!(created, Response::NewSession(_)));
+
+    let (control_tx, _control_rx) = mpsc::unbounded_channel();
+    let _attach_id = handler
+        .register_attach(requester_pid, alpha.clone(), control_tx)
+        .await;
+
+    let expected = "Latin ABC 123 | 日本語かな | 한글 | cafe\u{0301}".as_bytes();
+    let capture = RawPaneInputProbe::start(
+        &handler,
+        &alpha,
+        "live-attach-committed-utf8-text",
+        expected.len(),
+    )
+    .await;
+
+    let mut pending_input = Vec::new();
+    for chunk in [&expected[..17], &expected[17..35], &expected[35..]] {
+        handler
+            .handle_attached_live_input(requester_pid, &mut pending_input, chunk)
+            .await
+            .expect("committed utf8 text chunk");
+    }
+    assert!(pending_input.is_empty());
+
+    capture.finish(&handler, &alpha).await;
+    capture.assert_contents(&handler, expected).await;
+}
+
+#[tokio::test]
 async fn live_attach_focus_sequences_pass_through_unchanged() {
     let handler = RequestHandler::new();
     let alpha = session_name("alpha");

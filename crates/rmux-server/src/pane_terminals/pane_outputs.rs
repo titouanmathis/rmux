@@ -7,7 +7,6 @@ use rmux_core::{PaneGeometry, PaneId, Utf8Config};
 use rmux_proto::{RmuxError, SessionName};
 use rmux_pty::PtyMaster;
 
-#[cfg(unix)]
 use crate::pane_io::spawn_pane_output_reader;
 use crate::pane_io::{pane_output_channel, PaneAlertCallback, PaneExitCallback, PaneOutputSender};
 use crate::pane_terminal_lookup::{missing_pane_terminal, pane_id_for_target};
@@ -256,7 +255,6 @@ impl HandlerState {
             let _ = dead_panes.remove(&pane_id);
         }
         self.clear_attached_submitted_line(session_name, pane_id);
-        #[cfg(unix)]
         spawn_pane_output_reader(
             session_name.clone(),
             pane_id,
@@ -267,15 +265,6 @@ impl HandlerState {
             pane_alert_callback,
             pane_exit_callback,
         );
-        #[cfg(windows)]
-        {
-            let _ = (
-                output_reader,
-                pane_alert_callback,
-                pane_exit_callback,
-                generation,
-            );
-        }
         Ok(())
     }
 
@@ -308,7 +297,7 @@ impl HandlerState {
             .entry(session_name.clone())
             .or_default()
             .insert(pane_id, transcript.clone());
-        let _pane_output = self
+        let pane_output = self
             .pane_outputs
             .entry(session_name.clone())
             .or_default()
@@ -320,26 +309,16 @@ impl HandlerState {
             let _ = dead_panes.remove(&pane_id);
         }
         self.clear_attached_submitted_line(session_name, pane_id);
-        #[cfg(unix)]
         spawn_pane_output_reader(
             session_name.clone(),
             pane_id,
             output_reader,
             transcript,
-            _pane_output,
+            pane_output,
             Some(generation),
             pane_alert_callback,
             pane_exit_callback,
         );
-        #[cfg(windows)]
-        {
-            let _ = (
-                output_reader,
-                pane_alert_callback,
-                pane_exit_callback,
-                generation,
-            );
-        }
         Ok(())
     }
 

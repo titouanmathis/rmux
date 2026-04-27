@@ -145,6 +145,40 @@ fn overview_supported_surface_matches_implemented_commands_and_aliases() {
 }
 
 #[test]
+fn command_support_matrix_tracks_implemented_commands_and_aliases() {
+    let matrix = repo_file("spec/tmux-manpage-reference.yaml");
+    let commands_section = structured_section(&matrix, "## Commands", "## Built-In Aliases");
+    let aliases_section =
+        structured_section(&matrix, "## Built-In Aliases", "## Unsupported Commands");
+
+    let documented_commands = support_matrix_names(commands_section);
+    let expected_commands = super::super::implemented_command_surface()
+        .iter()
+        .map(|entry| entry.name.to_owned())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(documented_commands, expected_commands);
+
+    let documented_aliases = support_matrix_names(aliases_section);
+    let expected_aliases = super::super::documented_cli_aliases()
+        .iter()
+        .map(|alias| alias.alias.to_owned())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(documented_aliases, expected_aliases);
+
+    for status in support_matrix_statuses(commands_section)
+        .into_iter()
+        .chain(support_matrix_statuses(aliases_section))
+    {
+        assert!(
+            matches!(status.as_str(), "supported" | "partial" | "unsupported"),
+            "unexpected command support_status: {status}"
+        );
+    }
+
+    assert!(matrix.contains("Commands not returned by `rmux list-commands` are `unsupported`."));
+}
+
+#[test]
 fn manpage_surface_matches_implemented_commands_and_aliases() {
     let manpage = repo_file("rmux.1");
     let surface_entries = troff_literal_block(
@@ -171,6 +205,35 @@ fn manpage_surface_matches_implemented_commands_and_aliases() {
     assert!(manpage.contains(".B -Vh"));
     assert!(manpage.contains(".BR \"rmux <command> --help\" ."));
     assert!(manpage.contains(".BR \"rmux split-window -h\" ."));
+}
+
+fn support_matrix_names(section: &str) -> BTreeSet<String> {
+    section
+        .lines()
+        .filter(|line| line.starts_with("| `"))
+        .map(|line| {
+            line.split('|')
+                .nth(1)
+                .and_then(|cell| cell.trim().strip_prefix('`'))
+                .and_then(|cell| cell.strip_suffix('`'))
+                .unwrap_or_else(|| panic!("invalid support matrix row: {line}"))
+                .to_owned()
+        })
+        .collect()
+}
+
+fn support_matrix_statuses(section: &str) -> Vec<String> {
+    section
+        .lines()
+        .filter(|line| line.starts_with("| `"))
+        .map(|line| {
+            line.split('|')
+                .nth(2)
+                .unwrap_or_else(|| panic!("invalid support matrix row: {line}"))
+                .trim()
+                .to_owned()
+        })
+        .collect()
 }
 
 #[test]

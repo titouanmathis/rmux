@@ -43,7 +43,7 @@ fn read_line_from_master(
     Ok(line)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn pid_raw(pid: ProcessId) -> i32 {
     i32::try_from(pid.as_u32()).expect("test pid must fit in i32")
 }
@@ -87,6 +87,14 @@ fn process_exists(pid: ProcessId) -> bool {
     fs::metadata(format!("/proc/{}", pid_raw(pid))).is_ok()
 }
 
+#[cfg(target_os = "macos")]
+fn process_exists(pid: ProcessId) -> bool {
+    // SAFETY: `kill(pid, 0)` does not deliver a signal; it only checks whether
+    // the process exists and is visible to the current user.
+    let result = unsafe { libc::kill(pid_raw(pid), 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
 #[cfg(target_os = "linux")]
 fn is_wsl_kernel() -> bool {
     fs::read_to_string("/proc/sys/kernel/osrelease")
@@ -94,7 +102,7 @@ fn is_wsl_kernel() -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn wait_for_exit(
     child: &mut rmux_pty::PtyChild,
     timeout: Duration,
@@ -239,6 +247,48 @@ fn kill_terminates_the_pty_process_group() -> Result<(), Box<dyn std::error::Err
         let _ = spawned.child_mut().wait();
     }
     assert!(status.is_some(), "PTY leader did not exit after TERM");
+
+    Ok(())
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn kill_terminates_the_macos_pty_process_group() -> Result<(), Box<dyn std::error::Error>> {
+    let mut spawned = ChildCommand::new("/bin/sh")
+        .args([
+            "-c",
+            "stty raw -echo; sleep 30 & printf '%s\\n' \"$!\"; wait",
+        ])
+        .size(TerminalSize::new(80, 24))
+        .spawn()?;
+
+    let descendant_pid = read_line_from_master(spawned.master())?
+        .trim()
+        .parse::<i32>()?;
+    let descendant_pid = ProcessId::new(u32::try_from(descendant_pid)?)?;
+
+    spawned.child().kill(Signal::TERM)?;
+    let deadline = std::time::Instant::now() + Duration::from_millis(500);
+    while process_exists(descendant_pid) && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    if process_exists(descendant_pid) {
+        let _ = spawned.child().kill(Signal::KILL);
+        let _ = spawned.child_mut().wait();
+    }
+
+    assert!(
+        !process_exists(descendant_pid),
+        "macOS PTY descendant survived TERM"
+    );
+
+    let status = wait_for_exit(spawned.child_mut(), Duration::from_millis(500))?;
+    if status.is_none() {
+        let _ = spawned.child().kill(Signal::KILL);
+        let _ = spawned.child_mut().wait();
+    }
+    assert!(status.is_some(), "macOS PTY leader did not exit after TERM");
 
     Ok(())
 }

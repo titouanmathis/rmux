@@ -17,6 +17,8 @@ static SERVER_START_TIME: OnceLock<i64> = OnceLock::new();
 mod geometry;
 #[path = "format_runtime/loops.rs"]
 mod loops;
+#[path = "format_runtime/path.rs"]
+mod path;
 #[path = "format_runtime/process.rs"]
 mod process;
 #[path = "format_runtime/variables.rs"]
@@ -395,21 +397,11 @@ impl<'a> RuntimeFormatContext<'a> {
         None
     }
 
-    #[cfg(unix)]
     fn pane_screen_path(&self) -> Option<String> {
         let session = self.session?;
         let pane = self.pane?;
         let state = self.state?.pane_screen_state(session.name(), pane.id())?;
-        if state.path.is_empty() {
-            None
-        } else {
-            Some(state.path)
-        }
-    }
-
-    #[cfg(windows)]
-    fn pane_screen_path(&self) -> Option<String> {
-        None
+        path::pane_path_from_osc7(&state.path)
     }
 
     #[cfg(unix)]

@@ -302,6 +302,61 @@ async fn display_message_print_uses_stored_default_window_name_for_detached_sess
     );
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn display_message_print_uses_osc7_path_on_windows() {
+    let handler = RequestHandler::new();
+    let alpha = session_name("osc7cwd");
+
+    assert!(matches!(
+        handler
+            .handle(Request::NewSession(NewSessionRequest {
+                session_name: alpha.clone(),
+                detached: true,
+                size: Some(TerminalSize { cols: 80, rows: 24 }),
+                environment: None,
+            }))
+            .await,
+        Response::NewSession(_)
+    ));
+
+    let target = PaneTarget::with_window(alpha.clone(), 0, 0);
+    let expected_path = std::env::temp_dir().join("rmux osc7 cwd").join("pane");
+    let expected = expected_path.to_string_lossy().into_owned();
+    let uri_path = expected.replace('\\', "/").replace(' ', "%20");
+    let osc7 = format!("\x1b]7;file:///{uri_path}\x1b\\");
+
+    {
+        let mut state = handler.state.lock().await;
+        let pane_id = state
+            .sessions
+            .session(&alpha)
+            .and_then(|session| session.window_at(0))
+            .and_then(|window| window.pane(0))
+            .map(|pane| pane.id())
+            .expect("pane exists");
+        state
+            .append_bytes_to_runtime_pane_transcript(&alpha, pane_id, osc7.as_bytes())
+            .expect("OSC7 bytes append to pane transcript");
+    }
+
+    let response = handler
+        .handle(Request::DisplayMessage(DisplayMessageRequest {
+            target: Some(Target::Pane(target)),
+            print: true,
+            message: Some("#{pane_current_path}".to_owned()),
+        }))
+        .await;
+
+    let Response::DisplayMessage(response) = response else {
+        panic!("expected display-message response");
+    };
+    let output = response
+        .command_output()
+        .expect("display-message -p returns output");
+    assert_eq!(output.stdout(), format!("{expected}\n").as_bytes());
+}
+
 #[tokio::test]
 async fn display_message_print_reports_marked_pane_runtime_flags() {
     let handler = RequestHandler::new();

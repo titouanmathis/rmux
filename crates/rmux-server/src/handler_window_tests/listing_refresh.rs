@@ -232,6 +232,7 @@ async fn window_mutations_refresh_attached_sessions() {
     let _attach_id = handler
         .register_attach(requester_pid, alpha.clone(), control_tx)
         .await;
+    drain_attach_controls(&mut control_rx).await;
 
     assert!(matches!(
         handler
@@ -323,5 +324,8 @@ async fn window_mutations_refresh_attached_sessions() {
             .await,
         Response::ListWindows(_)
     ));
-    assert!(matches!(control_rx.try_recv(), Err(TryRecvError::Empty)));
+    match control_rx.try_recv() {
+        Err(TryRecvError::Empty) => {}
+        other => panic!("list-windows should not refresh attached clients, got {other:?}"),
+    }
 }

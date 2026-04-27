@@ -98,6 +98,7 @@ async fn scripted_pane_commands_accept_session_targets_like_tmux() {
     assert_eq!(output.stdout(), b"1\n");
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn if_shell_shell_mode_uses_tmux_shell_environment_and_caller_cwd() {
     let handler = RequestHandler::new();
@@ -183,6 +184,85 @@ async fn if_shell_shell_mode_uses_tmux_shell_environment_and_caller_cwd() {
     assert_eq!(fs::read_to_string(marker).expect("shell marker"), "used");
 }
 
+#[cfg(windows)]
+#[tokio::test]
+async fn if_shell_shell_mode_uses_windows_shell_environment_and_caller_cwd() {
+    let handler = RequestHandler::new();
+    let alpha = session_name("alpha");
+    let root = temp_root("if-shell-shell-mode");
+    fs::create_dir_all(&root).expect("caller cwd");
+    let cmd = std::env::var_os("COMSPEC")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("cmd.exe"));
+
+    assert!(matches!(
+        handler
+            .handle(Request::NewSession(NewSessionRequest {
+                session_name: alpha.clone(),
+                detached: true,
+                size: Some(TerminalSize { cols: 80, rows: 24 }),
+                environment: None,
+            }))
+            .await,
+        Response::NewSession(_)
+    ));
+    assert!(matches!(
+        handler
+            .handle(Request::SetOption(SetOptionRequest {
+                scope: ScopeSelector::Global,
+                option: OptionName::DefaultShell,
+                value: cmd.to_string_lossy().into_owned(),
+                mode: SetOptionMode::Replace,
+            }))
+            .await,
+        Response::SetOption(_)
+    ));
+    assert!(matches!(
+        handler
+            .handle(Request::SetEnvironment(SetEnvironmentRequest {
+                scope: ScopeSelector::Session(alpha.clone()),
+                name: "FOO".to_owned(),
+                value: "bar".to_owned(),
+                mode: None,
+                hidden: false,
+                format: false,
+            }))
+            .await,
+        Response::SetEnvironment(_)
+    ));
+
+    let root = root.to_string_lossy().into_owned();
+    let response = handler
+        .handle(Request::IfShell(IfShellRequest {
+            condition: format!(
+                "if not \"%FOO%\"==\"bar\" exit /b 1 & if not \"%CD%\"==\"{root}\" exit /b 1 & exit /b 0"
+            ),
+            format_mode: false,
+            then_command: "set-buffer -b chosen yes".to_owned(),
+            else_command: Some("set-buffer -b chosen no".to_owned()),
+            target: Some(Target::Session(alpha)),
+            caller_cwd: Some(PathBuf::from(root)),
+            background: false,
+        }))
+        .await;
+
+    assert_eq!(
+        response,
+        Response::IfShell(rmux_proto::IfShellResponse::no_output())
+    );
+    assert_eq!(
+        handler
+            .handle(Request::ShowBuffer(ShowBufferRequest {
+                name: Some("chosen".to_owned()),
+            }))
+            .await
+            .command_output()
+            .expect("show-buffer output")
+            .stdout(),
+        b"yes"
+    );
+}
+
 #[tokio::test]
 async fn if_shell_nested_set_buffer_accepts_hyphen_prefixed_content() {
     let handler = RequestHandler::new();
@@ -248,7 +328,7 @@ async fn if_shell_nested_run_shell_accepts_double_dash_before_command() {
         .handle(Request::IfShell(IfShellRequest {
             condition: "1".to_owned(),
             format_mode: true,
-            then_command: "run-shell -- true".to_owned(),
+            then_command: format!("run-shell -- {}", command_quote(&shell_success_command())),
             else_command: None,
             target: None,
             caller_cwd: None,
@@ -309,8 +389,12 @@ async fn if_shell_string_mode_runs_multiple_commands_in_one_group() {
 #[tokio::test]
 async fn if_shell_inserted_assignments_apply_before_parent_queue_tail() {
     let handler = RequestHandler::new();
+    let command = shell_env_or_default_command("FOO", "unset");
     let parsed = CommandParser::new()
-        .parse("if-shell -F 1 { FOO=bar } ; run-shell 'printf %s \"${FOO-unset}\"'")
+        .parse(&format!(
+            "if-shell -F 1 {{ FOO=bar }} ; run-shell {}",
+            command_quote(&command)
+        ))
         .expect("commands parse");
 
     let output = handler

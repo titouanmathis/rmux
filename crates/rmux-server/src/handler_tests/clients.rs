@@ -186,7 +186,10 @@ async fn list_clients_exposes_pid_and_tty_format_variables_for_attached_clients(
     let parts = line.split('|').collect::<Vec<_>>();
     assert_eq!(parts.len(), 3);
     assert_eq!(parts[1], requester_pid.to_string());
+    #[cfg(unix)]
     assert!(!parts[2].is_empty(), "client_tty should be populated");
+    #[cfg(windows)]
+    assert_eq!(parts[2], "");
 }
 
 #[tokio::test]

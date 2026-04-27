@@ -4,10 +4,12 @@ use crate::pane_io::AttachControl;
 use rmux_core::{WINLINK_ACTIVITY, WINLINK_BELL, WINLINK_SILENCE};
 use rmux_proto::{
     DisplayMessageRequest, HookName, KillWindowRequest, NewSessionExtRequest, NewSessionRequest,
-    NewWindowRequest, NextWindowRequest, OptionName, PaneTarget, PreviousWindowRequest, Request,
-    Response, ScopeSelector, SendKeysRequest, SessionName, SetOptionMode, SetOptionRequest,
-    ShowMessagesRequest, Target, TerminalSize, WindowTarget,
+    NewWindowRequest, NextWindowRequest, OptionName, PreviousWindowRequest, Request, Response,
+    ScopeSelector, SessionName, SetOptionMode, SetOptionRequest, ShowMessagesRequest, Target,
+    TerminalSize, WindowTarget,
 };
+#[cfg(unix)]
+use rmux_proto::{PaneTarget, SendKeysRequest};
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::{timeout, Duration};
 
@@ -384,6 +386,7 @@ async fn pane_alert_event_updates_grouped_session_window_names() {
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn shell_input_updates_window_name_and_foreground_process_formats() {
     let handler = RequestHandler::new();

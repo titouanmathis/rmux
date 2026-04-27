@@ -4,7 +4,9 @@ use super::*;
 async fn run_shell_foreground_captures_stdout() {
     let handler = RequestHandler::new();
 
-    let response = handler.handle(run_shell("printf hello", false)).await;
+    let response = handler
+        .handle(run_shell(&shell_print_command("hello"), false))
+        .await;
 
     assert_eq!(
         response,
@@ -19,7 +21,10 @@ async fn run_shell_nonzero_returns_error_without_stdout_payload() {
     let handler = RequestHandler::new();
 
     let response = handler
-        .handle(run_shell("printf hidden; exit 7", false))
+        .handle(run_shell(
+            &shell_print_then_exit_command("hidden", 7),
+            false,
+        ))
         .await;
 
     assert!(matches!(response, Response::Error(_)));
@@ -30,7 +35,9 @@ async fn run_shell_nonzero_returns_error_without_stdout_payload() {
 async fn run_shell_background_returns_immediately_without_output() {
     let handler = RequestHandler::new();
 
-    let response = handler.handle(run_shell("true", true)).await;
+    let response = handler
+        .handle(run_shell(&shell_success_command(), true))
+        .await;
 
     assert_eq!(response, Response::RunShell(RunShellResponse::background()));
 }
@@ -64,7 +71,7 @@ async fn parsed_new_session_start_directory_sets_session_cwd() {
     let parsed = CommandParser::new()
         .parse(&format!(
             "new-session -d -s alpha -c {}",
-            root.to_string_lossy()
+            shell_quote(&root)
         ))
         .expect("new-session -c parses");
 

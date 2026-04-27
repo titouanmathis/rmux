@@ -649,10 +649,7 @@ async fn after_show_options_runs_without_triggering_nested_notify_hooks() {
 async fn split_window_runs_explicit_and_generic_after_hooks() {
     let handler = RequestHandler::new();
     let output_path = temp_path("after-split-window");
-    let shell_command = format!(
-        "printf x >> {}",
-        shell_quote_str(&output_path.display().to_string())
-    );
+    let shell_command = append_x_command(&output_path);
     create_session(&handler, "alpha").await;
 
     assert!(matches!(
@@ -871,5 +868,21 @@ async fn environment_override_layering_session_then_override_then_rmux_pane() {
 }
 
 fn shell_quote_str(value: &str) -> String {
-    format!("'{}'", value.replace('\'', r"'\''"))
+    crate::test_shell::command_quote(value)
+}
+
+#[cfg(unix)]
+fn append_x_command(path: &std::path::Path) -> String {
+    format!(
+        "printf x >> {}",
+        shell_quote_str(&path.display().to_string())
+    )
+}
+
+#[cfg(windows)]
+fn append_x_command(path: &std::path::Path) -> String {
+    crate::test_shell::powershell_encoded_command(&format!(
+        "Add-Content -NoNewline -LiteralPath {} -Value 'x'",
+        crate::test_shell::powershell_quote_path(path)
+    ))
 }

@@ -5,7 +5,6 @@ use rmux_core::PaneId;
 use rmux_proto::{RmuxError, SessionName};
 use rmux_pty::PtyMaster;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::process::Command;
 use tokio::sync::{broadcast, watch};
 
 use crate::pane_io::PaneOutputSender;
@@ -219,8 +218,7 @@ impl ActivePanePipe {
         read_from_pipe: bool,
         write_to_pipe: bool,
     ) -> Result<Self, RmuxError> {
-        let mut child = Command::new(profile.shell());
-        child.arg("-c").arg(command);
+        let mut child = profile.shell_command(command);
         child.current_dir(profile.cwd());
         child.env_clear();
         child.kill_on_drop(true);

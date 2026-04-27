@@ -3,8 +3,9 @@ use super::*;
 #[tokio::test]
 async fn parsed_queue_assignments_apply_before_following_commands() {
     let handler = RequestHandler::new();
+    let command = shell_env_or_default_command("FOO", "unset");
     let parsed = CommandParser::new()
-        .parse("FOO=bar ; run-shell 'printf %s \"${FOO-unset}\"'")
+        .parse(&format!("FOO=bar ; run-shell {}", command_quote(&command)))
         .expect("commands parse");
 
     let output = handler
@@ -53,10 +54,12 @@ async fn parsed_queue_lock_client_defaults_to_current_client() {
 #[tokio::test]
 async fn if_shell_inserted_hidden_assignments_stay_out_of_process_environments() {
     let handler = RequestHandler::new();
+    let command = shell_env_or_default_command("SECRET", "unset");
     let parsed = CommandParser::new()
-        .parse(
-            "if-shell -F 1 { %hidden SECRET=classified } ; run-shell 'printf %s \"${SECRET-unset}\"'",
-        )
+        .parse(&format!(
+            "if-shell -F 1 {{ %hidden SECRET=classified }} ; run-shell {}",
+            command_quote(&command)
+        ))
         .expect("commands parse");
 
     let output = handler

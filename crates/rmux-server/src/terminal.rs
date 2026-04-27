@@ -161,6 +161,10 @@ impl TerminalProfile {
         &self.shell
     }
 
+    pub(crate) fn shell_command(&self, command: &str) -> tokio::process::Command {
+        ShellSpec::new(&self.shell).command_tokio_child(&self.cwd, command)
+    }
+
     pub(crate) fn environment_value(&self, name: &str) -> Option<&str> {
         self.environment.get(name).map(String::as_str)
     }

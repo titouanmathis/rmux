@@ -94,11 +94,21 @@ async fn send_marker(handler: &RequestHandler, target: PaneTarget, marker: &str)
     let response = handler
         .handle(Request::SendKeys(SendKeysRequest {
             target,
-            keys: vec![format!("printf '{marker}\\n'"), "Enter".to_owned()],
+            keys: vec![marker_print_command(marker), "Enter".to_owned()],
         }))
         .await;
 
     assert!(matches!(response, Response::SendKeys(_)));
+}
+
+#[cfg(unix)]
+fn marker_print_command(marker: &str) -> String {
+    format!("printf '{marker}\\n'")
+}
+
+#[cfg(windows)]
+fn marker_print_command(marker: &str) -> String {
+    format!("echo {marker}")
 }
 
 async fn wait_for_capture(handler: &RequestHandler, target: PaneTarget, marker: &str) -> Vec<u8> {

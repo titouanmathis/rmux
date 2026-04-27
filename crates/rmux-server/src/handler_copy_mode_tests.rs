@@ -5,7 +5,7 @@ use super::session_name;
 use rmux_core::{input::InputParser, Screen};
 use rmux_proto::{
     CapturePaneRequest, CopyModeRequest, ListPanesRequest, NewSessionRequest, PaneTarget, Request,
-    Response, SendKeysExtRequest, SendKeysRequest, ShowBufferRequest, TerminalSize,
+    Response, SendKeysExtRequest, ShowBufferRequest, TerminalSize,
 };
 use tokio::time::sleep;
 
@@ -42,16 +42,6 @@ async fn create_session(handler: &RequestHandler, name: &str, size: TerminalSize
         .await;
     assert!(matches!(response, Response::NewSession(_)));
     PaneTarget::with_window(session_name, 0, 0)
-}
-
-async fn send_shell(handler: &RequestHandler, target: &PaneTarget, command: &str) {
-    let response = handler
-        .handle(Request::SendKeys(SendKeysRequest {
-            target: target.clone(),
-            keys: vec![command.to_owned(), "Enter".to_owned()],
-        }))
-        .await;
-    assert!(matches!(response, Response::SendKeys(_)));
 }
 
 async fn replace_transcript_contents(
@@ -126,10 +116,23 @@ async fn send_copy_mode_command(
     target: &PaneTarget,
     tokens: &[&str],
 ) -> Response {
+    send_copy_mode_command_values(
+        handler,
+        target,
+        tokens.iter().map(|token| (*token).to_owned()).collect(),
+    )
+    .await
+}
+
+async fn send_copy_mode_command_values(
+    handler: &RequestHandler,
+    target: &PaneTarget,
+    tokens: Vec<String>,
+) -> Response {
     handler
         .handle(Request::SendKeysExt(SendKeysExtRequest {
             target: Some(target.clone()),
-            keys: tokens.iter().map(|token| (*token).to_owned()).collect(),
+            keys: tokens,
             expand_formats: false,
             hex: false,
             literal: false,
@@ -140,6 +143,13 @@ async fn send_copy_mode_command(
             repeat_count: None,
         }))
         .await
+}
+
+fn platform_copy_mode_arg(arg: &str) -> String {
+    match arg {
+        "cat >/dev/null" => crate::test_shell::stdin_discard_command(),
+        _ => arg.to_owned(),
+    }
 }
 
 async fn prepare_transfer_selection(handler: &RequestHandler, target: &PaneTarget) {
@@ -318,10 +328,11 @@ async fn copy_mode_command_table_dispatches_all_tmux_commands() {
     let handler = RequestHandler::new();
     let target = create_session(&handler, "gamma", TerminalSize { cols: 48, rows: 6 }).await;
 
-    send_shell(
+    replace_transcript_contents(
         &handler,
         &target,
-        "printf '(alpha) beta gamma\\nword_two more words\\nthird paragraph\\n\\nfourth line\\nlast line\\n'",
+        TerminalSize { cols: 48, rows: 6 },
+        b"(alpha) beta gamma\r\nword_two more words\r\nthird paragraph\r\n\r\nfourth line\r\nlast line\r\n",
     )
     .await;
     wait_for_capture(&handler, &target, "last line", false).await;
@@ -365,12 +376,12 @@ async fn copy_mode_command_table_dispatches_all_tmux_commands() {
             _ => {}
         }
 
-        let mut tokens = vec![*command];
+        let mut tokens = vec![(*command).to_owned()];
         if !args.is_empty() {
-            tokens.push("--");
-            tokens.extend(*args);
+            tokens.push("--".to_owned());
+            tokens.extend(args.iter().map(|arg| platform_copy_mode_arg(arg)));
         }
-        let response = send_copy_mode_command(&handler, &target, &tokens).await;
+        let response = send_copy_mode_command_values(&handler, &target, tokens).await;
         assert!(
             !matches!(response, Response::Error(_)),
             "{command} returned {response:?}"
@@ -383,10 +394,11 @@ async fn copy_mode_copy_selection_and_cancel_writes_buffer() {
     let handler = RequestHandler::new();
     let target = create_session(&handler, "delta", TerminalSize { cols: 40, rows: 4 }).await;
 
-    send_shell(
+    replace_transcript_contents(
         &handler,
         &target,
-        "printf 'alpha\\nneedle value\\nomega\\n'",
+        TerminalSize { cols: 40, rows: 4 },
+        b"alpha\r\nneedle value\r\nomega\r\n",
     )
     .await;
     wait_for_capture(&handler, &target, "needle", false).await;

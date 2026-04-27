@@ -11,6 +11,7 @@ use rmux_proto::{
 use std::path::Path;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
+use tokio::time::{timeout, Duration};
 
 fn session_name(value: &str) -> SessionName {
     SessionName::new(value).expect("valid session name")
@@ -65,6 +66,10 @@ async fn insert_window(handler: &RequestHandler, session_name: &SessionName, win
 
 fn assert_refresh(control: AttachControl) {
     assert!(matches!(control, AttachControl::Switch(_)));
+}
+
+async fn drain_attach_controls(control_rx: &mut mpsc::UnboundedReceiver<AttachControl>) {
+    while let Ok(Some(_)) = timeout(Duration::from_millis(250), control_rx.recv()).await {}
 }
 
 #[path = "handler_window_tests/lifecycle.rs"]

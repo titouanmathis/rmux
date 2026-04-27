@@ -28,8 +28,52 @@ fn unique_temp_path(label: &str) -> PathBuf {
     ))
 }
 
+#[cfg(unix)]
 fn shell_quote(path: &Path) -> String {
-    format!("'{}'", path.display().to_string().replace('\'', r"'\''"))
+    crate::test_shell::sh_quote_path(path)
+}
+
+#[cfg(windows)]
+fn pipe_to_file_command(path: &Path) -> String {
+    crate::test_shell::powershell_encoded_command(&format!(
+        "$out=[System.IO.File]::Open({}, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite); try {{ $buf=New-Object byte[] 4096; $inputStream=[Console]::OpenStandardInput(); while (($n=$inputStream.Read($buf,0,$buf.Length)) -gt 0) {{ $out.Write($buf,0,$n); $out.Flush() }} }} finally {{ $out.Dispose() }}",
+        crate::test_shell::powershell_quote_path(path)
+    ))
+}
+
+#[cfg(unix)]
+fn pipe_to_file_command(path: &Path) -> String {
+    format!("cat > {}", shell_quote(path))
+}
+
+fn pipe_discard_command() -> String {
+    crate::test_shell::stdin_discard_command()
+}
+
+#[cfg(unix)]
+fn pane_print_command(text: &str) -> String {
+    format!("printf '{}\\n'", text.replace('\'', r"'\''"))
+}
+
+#[cfg(windows)]
+fn pane_print_command(text: &str) -> String {
+    format!("echo {text}")
+}
+
+#[cfg(unix)]
+fn respawn_probe_command(output: &Path) -> String {
+    format!(
+        "printf '%s:%s' \"$(pwd)\" \"$RMUX_RESPAWN\" > {}",
+        shell_quote(output)
+    )
+}
+
+#[cfg(windows)]
+fn respawn_probe_command(output: &Path) -> String {
+    crate::test_shell::powershell_encoded_command(&format!(
+        "[System.IO.File]::WriteAllText({}, ((Get-Location).Path + ':' + $env:RMUX_RESPAWN))",
+        crate::test_shell::powershell_quote_path(output)
+    ))
 }
 
 async fn create_session(handler: &RequestHandler, session_name: &SessionName) {
@@ -244,7 +288,7 @@ async fn pipe_pane_once_keeps_the_existing_pipe() {
             stdin: false,
             stdout: true,
             once: false,
-            command: Some(format!("cat > {}", shell_quote(&first_output))),
+            command: Some(pipe_to_file_command(&first_output)),
         }))
         .await;
     assert!(matches!(first, rmux_proto::Response::PipePane(_)));
@@ -255,7 +299,7 @@ async fn pipe_pane_once_keeps_the_existing_pipe() {
             stdin: false,
             stdout: true,
             once: true,
-            command: Some(format!("cat > {}", shell_quote(&second_output))),
+            command: Some(pipe_to_file_command(&second_output)),
         }))
         .await;
     assert!(matches!(second, rmux_proto::Response::PipePane(_)));
@@ -263,7 +307,7 @@ async fn pipe_pane_once_keeps_the_existing_pipe() {
     let sent = handler
         .handle(Request::SendKeys(SendKeysRequest {
             target: PaneTarget::with_window(alpha.clone(), 0, 0),
-            keys: vec!["printf 'pipe-once-test\\n'".to_owned(), "Enter".to_owned()],
+            keys: vec![pane_print_command("pipe-once-test"), "Enter".to_owned()],
         }))
         .await;
     assert!(matches!(sent, rmux_proto::Response::SendKeys(_)));
@@ -292,6 +336,17 @@ async fn pipe_pane_rejects_dead_panes() {
     let handler = RequestHandler::new();
     let alpha = session_name("alpha");
     create_session(&handler, &alpha).await;
+    assert!(matches!(
+        handler
+            .handle(Request::SetOption(SetOptionRequest {
+                scope: ScopeSelector::Pane(PaneTarget::with_window(alpha.clone(), 0, 0)),
+                option: OptionName::RemainOnExit,
+                value: "on".to_owned(),
+                mode: SetOptionMode::Replace,
+            }))
+            .await,
+        rmux_proto::Response::SetOption(_)
+    ));
 
     let respawned = handler
         .handle(Request::RespawnPane(RespawnPaneRequest {
@@ -311,7 +366,7 @@ async fn pipe_pane_rejects_dead_panes() {
             stdin: false,
             stdout: true,
             once: false,
-            command: Some("cat >/dev/null".to_owned()),
+            command: Some(pipe_discard_command()),
         }))
         .await;
 
@@ -358,10 +413,7 @@ async fn respawn_pane_with_kill_flag_applies_directory_environment_and_command()
             kill: true,
             start_directory: Some(cwd.clone()),
             environment: Some(vec!["RMUX_RESPAWN=ready".to_owned()]),
-            command: Some(vec![format!(
-                "printf '%s:%s' \"$(pwd)\" \"$RMUX_RESPAWN\" > {}",
-                shell_quote(&output)
-            )]),
+            command: Some(vec![respawn_probe_command(&output)]),
         }))
         .await;
 
@@ -681,11 +733,24 @@ async fn swap_pane_self_swap_is_a_no_op() {
 async fn respawn_pane_dead_pane_succeeds_without_kill_flag() {
     let handler = RequestHandler::new();
     let alpha = session_name("alpha");
+    let target = PaneTarget::with_window(alpha.clone(), 0, 0);
     create_session(&handler, &alpha).await;
+
+    assert!(matches!(
+        handler
+            .handle(Request::SetOption(SetOptionRequest {
+                scope: ScopeSelector::Pane(target.clone()),
+                option: OptionName::RemainOnExit,
+                value: "on".to_owned(),
+                mode: SetOptionMode::Replace,
+            }))
+            .await,
+        rmux_proto::Response::SetOption(_)
+    ));
 
     let respawned = handler
         .handle(Request::RespawnPane(RespawnPaneRequest {
-            target: PaneTarget::with_window(alpha.clone(), 0, 0),
+            target: target.clone(),
             kill: true,
             start_directory: None,
             environment: None,
@@ -697,7 +762,7 @@ async fn respawn_pane_dead_pane_succeeds_without_kill_flag() {
 
     let response = handler
         .handle(Request::RespawnPane(RespawnPaneRequest {
-            target: PaneTarget::with_window(alpha.clone(), 0, 0),
+            target,
             kill: false,
             start_directory: None,
             environment: None,
@@ -912,7 +977,7 @@ async fn pipe_pane_empty_command_closes_existing_pipe() {
             stdin: false,
             stdout: true,
             once: false,
-            command: Some("cat >/dev/null".to_owned()),
+            command: Some(pipe_discard_command()),
         }))
         .await;
     assert!(matches!(open, rmux_proto::Response::PipePane(_)));
@@ -939,7 +1004,7 @@ async fn pipe_pane_empty_command_closes_existing_pipe() {
             stdin: false,
             stdout: true,
             once: true,
-            command: Some("cat >/dev/null".to_owned()),
+            command: Some(pipe_discard_command()),
         }))
         .await;
     assert!(

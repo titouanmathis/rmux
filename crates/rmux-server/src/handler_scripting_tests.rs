@@ -89,6 +89,60 @@ fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
 }
 
+fn command_quote(command: &str) -> String {
+    crate::test_shell::command_quote(command)
+}
+
+#[cfg(unix)]
+fn shell_print_command(text: &str) -> String {
+    format!("printf {}", command_quote(text))
+}
+
+#[cfg(windows)]
+fn shell_print_command(text: &str) -> String {
+    crate::test_shell::powershell_encoded_command(&format!(
+        "[Console]::Out.Write({})",
+        crate::test_shell::powershell_quote(text)
+    ))
+}
+
+#[cfg(unix)]
+fn shell_print_then_exit_command(text: &str, code: u8) -> String {
+    format!("printf {}; exit {code}", command_quote(text))
+}
+
+#[cfg(windows)]
+fn shell_print_then_exit_command(text: &str, code: u8) -> String {
+    crate::test_shell::powershell_encoded_command(&format!(
+        "[Console]::Out.Write({}); exit {code}",
+        crate::test_shell::powershell_quote(text)
+    ))
+}
+
+#[cfg(unix)]
+fn shell_success_command() -> String {
+    "true".to_owned()
+}
+
+#[cfg(windows)]
+fn shell_success_command() -> String {
+    crate::test_shell::powershell_encoded_command("exit 0")
+}
+
+#[cfg(unix)]
+fn shell_env_or_default_command(name: &str, default: &str) -> String {
+    format!("printf %s \"${{{name}-{default}}}\"")
+}
+
+#[cfg(windows)]
+fn shell_env_or_default_command(name: &str, default: &str) -> String {
+    crate::test_shell::powershell_encoded_command(&format!(
+        "$value=[Environment]::GetEnvironmentVariable({}); if ([string]::IsNullOrEmpty($value)) {{ $value={} }}; [Console]::Out.Write($value)",
+        crate::test_shell::powershell_quote(name),
+        crate::test_shell::powershell_quote(default)
+    ))
+}
+
 #[path = "handler_scripting_tests/run_shell.rs"]
 mod run_shell;
 

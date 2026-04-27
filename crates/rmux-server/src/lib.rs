@@ -83,6 +83,8 @@ mod status_ranges;
 #[cfg(any(unix, windows))]
 #[cfg_attr(windows, allow(dead_code))]
 mod terminal;
+#[cfg(test)]
+mod test_shell;
 #[cfg(any(unix, windows))]
 #[cfg_attr(windows, allow(dead_code))]
 mod wait_for;

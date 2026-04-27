@@ -32,8 +32,13 @@ async fn send_keys_uses_runtime_extended_key_format_for_mode_two() {
             .expect("mode 2 transcript update");
     }
 
-    let output_path = unique_output_path("extended-key");
-    start_cat_capture(&handler, &alpha, &output_path).await;
+    let expected = encode_key(
+        mode::MODE_KEYS_EXTENDED_2,
+        ExtendedKeyFormat::CsiU,
+        key_string_lookup_string("M-C-a").expect("key parses"),
+    )
+    .expect("extended key encodes");
+    let capture = RawPaneInputProbe::start(&handler, &alpha, "extended-key", expected.len()).await;
 
     let response = handler
         .handle(Request::SendKeysExt(SendKeysExtRequest {
@@ -54,18 +59,8 @@ async fn send_keys_uses_runtime_extended_key_format_for_mode_two() {
         Response::SendKeys(SendKeysResponse { key_count: 1 })
     );
 
-    finish_cat_capture(&handler, &alpha).await;
-
-    let expected = encode_key(
-        mode::MODE_KEYS_EXTENDED_2,
-        ExtendedKeyFormat::CsiU,
-        key_string_lookup_string("M-C-a").expect("key parses"),
-    )
-    .expect("extended key encodes");
-    wait_for_file_bytes(&output_path, &expected)
-        .await
-        .expect("extended key file contents");
-    let _ = fs::remove_file(&output_path);
+    capture.finish(&handler, &alpha).await;
+    capture.assert_contents(&handler, &expected).await;
 }
 
 #[tokio::test]
@@ -134,8 +129,9 @@ async fn send_keys_m_forwards_the_current_mouse_event_to_the_pane() {
         });
     }
 
-    let output_path = unique_output_path("mouse-forward");
-    start_cat_capture(&handler, &alpha, &output_path).await;
+    let expected =
+        encode_mouse_event(mode::MODE_MOUSE_STANDARD, &raw, raw.x, raw.y).expect("mouse encodes");
+    let capture = RawPaneInputProbe::start(&handler, &alpha, "mouse-forward", expected.len()).await;
 
     let response = handler
         .handle(Request::SendKeysExt(SendKeysExtRequest {
@@ -156,14 +152,8 @@ async fn send_keys_m_forwards_the_current_mouse_event_to_the_pane() {
         Response::SendKeys(SendKeysResponse { key_count: 0 })
     );
 
-    finish_cat_capture(&handler, &alpha).await;
-
-    let expected =
-        encode_mouse_event(mode::MODE_MOUSE_STANDARD, &raw, raw.x, raw.y).expect("mouse encodes");
-    wait_for_file_bytes(&output_path, &expected)
-        .await
-        .expect("mouse file contents");
-    let _ = fs::remove_file(&output_path);
+    capture.finish(&handler, &alpha).await;
+    capture.assert_contents(&handler, &expected).await;
 }
 
 #[tokio::test]
@@ -187,20 +177,18 @@ async fn live_attach_extended_keys_are_reencoded_for_the_target_pane() {
         .register_attach(requester_pid, alpha.clone(), control_tx)
         .await;
 
-    let output_path = unique_output_path("live-attach-extended-key");
-    start_cat_capture(&handler, &alpha, &output_path).await;
+    let expected = b"\x1b[Z";
+    let capture =
+        RawPaneInputProbe::start(&handler, &alpha, "live-attach-extended-key", expected.len())
+            .await;
 
     handler
         .handle_attached_live_input_for_test(requester_pid, b"\x1b[9;2u")
         .await
         .expect("live attach input");
 
-    finish_cat_capture(&handler, &alpha).await;
-
-    wait_for_file_bytes(&output_path, b"\x1b[Z")
-        .await
-        .expect("extended key file contents");
-    let _ = fs::remove_file(&output_path);
+    capture.finish(&handler, &alpha).await;
+    capture.assert_contents(&handler, expected).await;
 }
 
 #[tokio::test]
@@ -224,8 +212,14 @@ async fn live_attach_bracketed_paste_sequences_pass_through_unchanged_when_chunk
         .register_attach(requester_pid, alpha.clone(), control_tx)
         .await;
 
-    let output_path = unique_output_path("live-attach-bracketed-paste");
-    start_cat_capture(&handler, &alpha, &output_path).await;
+    let expected = b"\x1b[200~paste\x1b[201~";
+    let capture = RawPaneInputProbe::start(
+        &handler,
+        &alpha,
+        "live-attach-bracketed-paste",
+        expected.len(),
+    )
+    .await;
 
     let mut pending_input = Vec::new();
     handler
@@ -240,12 +234,8 @@ async fn live_attach_bracketed_paste_sequences_pass_through_unchanged_when_chunk
         .expect("second bracketed paste chunk");
     assert!(pending_input.is_empty());
 
-    finish_cat_capture(&handler, &alpha).await;
-
-    wait_for_file_bytes(&output_path, b"\x1b[200~paste\x1b[201~")
-        .await
-        .expect("bracketed paste file contents");
-    let _ = fs::remove_file(&output_path);
+    capture.finish(&handler, &alpha).await;
+    capture.assert_contents(&handler, expected).await;
 }
 
 #[tokio::test]
@@ -269,20 +259,17 @@ async fn live_attach_focus_sequences_pass_through_unchanged() {
         .register_attach(requester_pid, alpha.clone(), control_tx)
         .await;
 
-    let output_path = unique_output_path("live-attach-focus");
-    start_cat_capture(&handler, &alpha, &output_path).await;
+    let expected = b"\x1b[I\x1b[O";
+    let capture =
+        PaneInputCapture::start(&handler, &alpha, "live-attach-focus", expected.len()).await;
 
     handler
         .handle_attached_live_input_for_test(requester_pid, b"\x1b[I\x1b[O")
         .await
         .expect("live attach focus input");
 
-    finish_cat_capture(&handler, &alpha).await;
-
-    wait_for_file_bytes(&output_path, b"\x1b[I\x1b[O")
-        .await
-        .expect("focus sequence file contents");
-    let _ = fs::remove_file(&output_path);
+    capture.finish(&handler, &alpha).await;
+    capture.assert_contents(expected).await;
 }
 
 #[tokio::test]
@@ -324,16 +311,6 @@ async fn live_attach_mouse_sequences_dispatch_default_mouse_bindings() {
         .await;
     assert!(matches!(rebound, Response::BindKey(_)));
 
-    let output_path = unique_output_path("live-attach-mouse");
-    start_cat_capture(&handler, &alpha, &output_path).await;
-
-    handler
-        .handle_attached_live_input_for_test(requester_pid, b"\x1b[<32;2;2M")
-        .await
-        .expect("live attach mouse input");
-
-    finish_cat_capture(&handler, &alpha).await;
-
     let expected = encode_mouse_event(
         mode::MODE_MOUSE_BUTTON,
         &MouseForwardEvent {
@@ -351,10 +328,16 @@ async fn live_attach_mouse_sequences_dispatch_default_mouse_bindings() {
         1,
     )
     .expect("mouse encodes");
-    wait_for_file_bytes(&output_path, &expected)
+    let capture =
+        RawPaneInputProbe::start(&handler, &alpha, "live-attach-mouse", expected.len()).await;
+
+    handler
+        .handle_attached_live_input_for_test(requester_pid, b"\x1b[<32;2;2M")
         .await
-        .expect("mouse file contents");
-    let _ = fs::remove_file(&output_path);
+        .expect("live attach mouse input");
+
+    capture.finish(&handler, &alpha).await;
+    capture.assert_contents(&handler, &expected).await;
 
     let active_attach = handler.active_attach.lock().await;
     let event = active_attach

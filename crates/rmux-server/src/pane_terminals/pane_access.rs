@@ -189,6 +189,40 @@ impl HandlerState {
             .clone_pane_master(&runtime_session_name, pane_id, window_index, pane_index)
     }
 
+    #[cfg(all(test, windows))]
+    pub(crate) fn start_pane_input_capture_for_test(&self, target: &PaneTarget) {
+        self.pane_input_captures
+            .lock()
+            .expect("pane input capture mutex")
+            .insert(target.to_string(), Vec::new());
+    }
+
+    #[cfg(all(test, windows))]
+    pub(crate) fn append_pane_input_capture_for_test(
+        &self,
+        target: &PaneTarget,
+        bytes: &[u8],
+    ) -> bool {
+        let mut captures = self
+            .pane_input_captures
+            .lock()
+            .expect("pane input capture mutex");
+        let Some(captured) = captures.get_mut(&target.to_string()) else {
+            return false;
+        };
+        captured.extend_from_slice(bytes);
+        true
+    }
+
+    #[cfg(all(test, windows))]
+    pub(crate) fn pane_input_capture_for_test(&self, target: &PaneTarget) -> Option<Vec<u8>> {
+        self.pane_input_captures
+            .lock()
+            .expect("pane input capture mutex")
+            .get(&target.to_string())
+            .cloned()
+    }
+
     pub(crate) fn pane_pid_in_window(
         &self,
         session_name: &SessionName,

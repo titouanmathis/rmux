@@ -4,6 +4,9 @@ use std::time::{Duration, Instant};
 
 use rmux_pty::{ChildCommand, PtyMaster, PtyPair, TerminalSize};
 
+#[path = "windows_conpty/job.rs"]
+mod job;
+
 #[test]
 fn conpty_pair_opens_resizes_and_clones_master() -> Result<(), Box<dyn std::error::Error>> {
     let pair = PtyPair::open_with_size(TerminalSize::new(100, 30))?;
@@ -33,6 +36,46 @@ fn conpty_spawn_reads_child_output_and_waits() -> Result<(), Box<dyn std::error:
         "expected marker in ConPTY output, got {:?}",
         String::from_utf8_lossy(&output)
     );
+    assert!(spawned.child_mut().try_wait()?.is_some());
+    Ok(())
+}
+
+#[test]
+fn conpty_spawn_succeeds_when_parent_is_already_in_job() -> Result<(), Box<dyn std::error::Error>> {
+    job::run_parent_job_helper(job::ParentJobMode::NoBreakaway)
+}
+
+#[test]
+fn conpty_breakaway_retry_succeeds_when_parent_job_allows_breakaway(
+) -> Result<(), Box<dyn std::error::Error>> {
+    job::run_parent_job_helper(job::ParentJobMode::BreakawayAllowed)
+}
+
+#[test]
+fn conpty_spawn_inside_parent_job_helper() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(mode) = job::requested_helper_mode() else {
+        return Ok(());
+    };
+    let _parent_job = job::assign_current_process_to_job(mode)?;
+    let mut spawned = ChildCommand::new("C:\\Windows\\System32\\cmd.exe")
+        .args(["/C", "echo RMUX_PARENT_JOB_OK & ping -n 30 127.0.0.1 >NUL"])
+        .size(TerminalSize::new(80, 24))
+        .spawn()?;
+
+    let output = read_until(
+        spawned.master(),
+        b"RMUX_PARENT_JOB_OK",
+        Duration::from_secs(2),
+    )?;
+    assert!(
+        String::from_utf8_lossy(&output).contains("RMUX_PARENT_JOB_OK"),
+        "expected parent-job marker in ConPTY output, got {:?}",
+        String::from_utf8_lossy(&output)
+    );
+
+    spawned.child().terminate_forcefully()?;
+    let status = spawned.child_mut().wait()?;
+    assert!(!status.success());
     assert!(spawned.child_mut().try_wait()?.is_some());
     Ok(())
 }

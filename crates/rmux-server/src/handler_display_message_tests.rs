@@ -42,7 +42,17 @@ fn windows_command_exists(command: &str) -> bool {
     let Some(path_value) = std::env::var_os("PATH") else {
         return false;
     };
-    std::env::split_paths(&path_value).any(|directory| directory.join(command).is_file())
+    std::env::split_paths(&path_value).any(|directory| {
+        let candidate = directory.join(command);
+        candidate.is_file() && windows_shell_candidate_is_usable(&candidate)
+    })
+}
+
+#[cfg(windows)]
+fn windows_shell_candidate_is_usable(path: &Path) -> bool {
+    !path
+        .components()
+        .any(|component| component.as_os_str().eq_ignore_ascii_case("WindowsApps"))
 }
 
 #[cfg(windows)]

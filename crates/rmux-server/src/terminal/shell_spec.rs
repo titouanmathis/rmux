@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::process::Command as StdCommand;
 
 use rmux_pty::ChildCommand;
 use tokio::process::Command as TokioCommand;
@@ -27,6 +28,10 @@ impl ShellSpec {
 
     pub(super) fn command_tokio_child(&self, cwd: &Path, command: &str) -> TokioCommand {
         self.command_plan(cwd, command).into_tokio_command()
+    }
+
+    pub(super) fn command_std_child(&self, cwd: &Path, command: &str) -> StdCommand {
+        self.command_plan(cwd, command).into_std_command()
     }
 
     pub(super) fn interactive_child(&self, cwd: &Path) -> ChildCommand {
@@ -126,6 +131,17 @@ impl ShellCommandPlan {
 
     fn into_tokio_command(self) -> TokioCommand {
         let mut command = TokioCommand::new(self.program);
+        command.args(self.args);
+        command
+    }
+
+    fn into_std_command(self) -> StdCommand {
+        let mut command = StdCommand::new(self.program);
+        #[cfg(unix)]
+        if let Some(arg0) = self.arg0 {
+            use std::os::unix::process::CommandExt as _;
+            command.arg0(arg0);
+        }
         command.args(self.args);
         command
     }

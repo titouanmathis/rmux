@@ -178,14 +178,14 @@ pub(super) fn source_inputs_for_path(
     for entry in entries {
         match std::fs::read_to_string(&entry) {
             Ok(contents) => inputs.push(SourceInput {
-                current_file: entry.to_string_lossy().into_owned(),
+                current_file: source_entry_display_path(&entry),
                 contents,
             }),
             Err(error) if quiet && error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => {
                 return Err(RmuxError::Server(format!(
                     "{}: {error}",
-                    entry.to_string_lossy()
+                    source_entry_display_path(&entry)
                 )));
             }
         }
@@ -196,7 +196,15 @@ pub(super) fn source_inputs_for_path(
 
 #[cfg(windows)]
 fn is_windows_null_config_path(path: &str) -> bool {
-    path.eq_ignore_ascii_case("NUL")
+    let trimmed = path.trim_end_matches(['\\', '/']);
+    let Some(component) = trimmed.rsplit(['\\', '/']).next() else {
+        return false;
+    };
+    let component = component.trim_end_matches(':');
+    let device = component
+        .split_once('.')
+        .map_or(component, |(stem, _)| stem);
+    device.eq_ignore_ascii_case("NUL")
 }
 
 fn glob_pattern_for_source_path(path: &str, cwd: Option<&Path>) -> String {
@@ -219,6 +227,18 @@ fn path_to_glob_pattern(path: &Path) -> String {
     #[cfg(windows)]
     {
         path.to_string_lossy().replace('\\', "/")
+    }
+
+    #[cfg(not(windows))]
+    {
+        path.to_string_lossy().into_owned()
+    }
+}
+
+fn source_entry_display_path(path: &Path) -> String {
+    #[cfg(windows)]
+    {
+        path.to_string_lossy().replace('/', "\\")
     }
 
     #[cfg(not(windows))]
@@ -257,5 +277,17 @@ mod tests {
         let pattern = glob_pattern_for_source_path(r"C:\Users\RMUXUser\rmux\config.conf", None);
 
         assert_eq!(pattern, "C:/Users/RMUXUser/rmux/config.conf");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_null_device_config_paths_are_ignored() {
+        assert!(super::is_windows_null_config_path("NUL"));
+        assert!(super::is_windows_null_config_path("nul:"));
+        assert!(super::is_windows_null_config_path(r"C:\tmp\NUL"));
+        assert!(super::is_windows_null_config_path(r"C:\tmp\NUL.conf"));
+        assert!(super::is_windows_null_config_path(r"\\.\NUL"));
+        assert!(!super::is_windows_null_config_path(r"C:\tmp\null.conf"));
+        assert!(!super::is_windows_null_config_path(r"C:\tmp\nulled"));
     }
 }

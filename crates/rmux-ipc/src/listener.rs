@@ -79,17 +79,23 @@ async fn accept_impl(listener: &LocalListener) -> io::Result<(LocalStream, PeerI
 
 #[cfg(windows)]
 async fn accept_impl(listener: &LocalListener) -> io::Result<(LocalStream, PeerIdentity)> {
-    let server = {
-        let mut pending = listener.pending.lock().await;
-        pending
-            .pop_front()
-            .ok_or_else(|| io::Error::other("named-pipe backlog was exhausted"))?
-    };
-    server.connect().await?;
+    let server = accept_pending_server(listener).await?;
     let peer = PeerIdentity::from_windows_pipe(&server);
     replenish_pending_server(listener).await?;
 
     Ok((server, peer?))
+}
+
+#[cfg(windows)]
+async fn accept_pending_server(listener: &LocalListener) -> io::Result<NamedPipeServer> {
+    let mut pending = listener.pending.lock().await;
+    let server = pending
+        .front_mut()
+        .ok_or_else(|| io::Error::other("named-pipe backlog was exhausted"))?;
+    server.connect().await?;
+    pending
+        .pop_front()
+        .ok_or_else(|| io::Error::other("named-pipe backlog was exhausted"))
 }
 
 #[cfg(windows)]
@@ -183,4 +189,44 @@ impl Drop for SameUserSecurityAttributes {
 #[cfg(windows)]
 fn wide_null(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use crate::{connect_blocking, endpoint_for_label};
+    use std::sync::mpsc;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn cancelled_accept_does_not_drain_windows_pipe_backlog() -> io::Result<()> {
+        let endpoint = endpoint_for_label(format!("listener-cancel-{}", std::process::id()))?;
+        let listener = Arc::new(LocalListener::bind(&endpoint)?);
+
+        for _ in 0..NAMED_PIPE_BACKLOG {
+            let listener = Arc::clone(&listener);
+            let accept_task = tokio::spawn(async move { listener.accept().await });
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            accept_task.abort();
+            let _ = accept_task.await;
+        }
+
+        let (release_client, client_release) = mpsc::channel();
+        let endpoint_for_client = endpoint.clone();
+        let client = tokio::task::spawn_blocking(move || {
+            let client = connect_blocking(&endpoint_for_client, Duration::from_secs(2))?;
+            let _ = client_release.recv_timeout(Duration::from_secs(2));
+            drop(client);
+            Ok::<(), io::Error>(())
+        });
+        let accepted = tokio::time::timeout(Duration::from_secs(2), listener.accept())
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "accept timed out"))?;
+
+        let (_server, _peer) = accepted?;
+        let _ = release_client.send(());
+        client.await.map_err(io::Error::other)??;
+        Ok(())
+    }
 }

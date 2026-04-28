@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-#[cfg(windows)]
-use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -161,6 +159,10 @@ impl TerminalProfile {
         ShellSpec::new(&self.shell).command_tokio_child(&self.cwd, command)
     }
 
+    pub(crate) fn shell_std_command(&self, command: &str) -> Command {
+        ShellSpec::new(&self.shell).command_std_child(&self.cwd, command)
+    }
+
     pub(crate) fn environment_value(&self, name: &str) -> Option<&str> {
         self.environment.get(name).map(String::as_str)
     }
@@ -228,9 +230,30 @@ fn spawn_command(profile: &TerminalProfile, command: Option<&[String]>) -> Child
     }
 }
 
+#[cfg(test)]
 pub(crate) fn spawn_hook_command(command: String) -> io::Result<()> {
+    spawn_hook_child(default_hook_command(command)?)
+}
+
+pub(crate) fn spawn_hook_command_with_profile(
+    command: String,
+    profile: &TerminalProfile,
+) -> io::Result<()> {
+    let mut child = profile.shell_std_command(&command);
+    child.current_dir(profile.cwd()).env_clear();
+    for (name, value) in profile.environment() {
+        child.env(name, value);
+    }
+    spawn_hook_child(child)
+}
+
+fn spawn_hook_child(mut child: Command) -> io::Result<()> {
     let handle = Handle::try_current().map_err(io::Error::other)?;
-    let child = hook_command(command).spawn()?;
+    child
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let child = child.spawn()?;
 
     handle.spawn_blocking(move || {
         let mut child = child;
@@ -240,30 +263,24 @@ pub(crate) fn spawn_hook_command(command: String) -> io::Result<()> {
     Ok(())
 }
 
-fn hook_command(command: String) -> Command {
+#[cfg(test)]
+fn default_hook_command(command: String) -> io::Result<Command> {
     #[cfg(unix)]
     {
         let mut child = Command::new("sh");
         child.arg("-c").arg(command);
-        child
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        child
+        Ok(child)
     }
 
     #[cfg(windows)]
     {
-        let shell = std::env::var_os("POWERSHELL")
-            .or_else(|| std::env::var_os("PWsh"))
-            .unwrap_or_else(|| OsString::from("powershell.exe"));
-        let mut child = Command::new(shell);
-        child.arg("-NoProfile").arg("-Command").arg(command);
-        child
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        child
+        let options = OptionStore::new();
+        let environment = std::env::vars().collect::<HashMap<_, _>>();
+        let cwd = resolve_working_directory(None).map_err(io::Error::other)?;
+        let shell = resolve_shell_path(&options, None, &environment);
+        let mut child = ShellSpec::new(&shell).command_std_child(&cwd, &command);
+        child.current_dir(cwd);
+        Ok(child)
     }
 }
 
@@ -330,6 +347,9 @@ fn executable_name(path: impl AsRef<std::ffi::OsStr>) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
+#[cfg(test)]
+#[path = "terminal/hook_tests.rs"]
+mod hook_tests;
 #[cfg(test)]
 #[path = "terminal/tests.rs"]
 mod tests;

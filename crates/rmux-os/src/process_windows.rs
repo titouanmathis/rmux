@@ -51,12 +51,7 @@ pub(super) fn command_name(pid: u32) -> io::Result<Option<String>> {
         return Err(io::Error::last_os_error());
     }
     buffer.truncate(usize::try_from(len).map_err(|_| io::ErrorKind::InvalidData)?);
-    let path = String::from_utf16(&buffer).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("invalid process image path: {error}"),
-        )
-    })?;
+    let path = wide_to_string_lossy(&buffer);
     Ok(super::executable_name(&path))
 }
 
@@ -180,9 +175,7 @@ impl RemoteProcess {
         let Some(()) = self.read_exact(value.buffer, buffer.as_mut_ptr().cast(), byte_len)? else {
             return Ok(None);
         };
-        String::from_utf16(&buffer)
-            .map(Some)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+        Ok(Some(wide_to_string_lossy(&buffer)))
     }
 
     fn read_environment_block(&self, address: usize) -> io::Result<Option<Vec<u16>>> {
@@ -320,7 +313,7 @@ fn environment_from_wide_block(block: &[u16]) -> Option<HashMap<String, String>>
         if entry.is_empty() {
             break;
         }
-        let entry = String::from_utf16(entry).ok()?;
+        let entry = wide_to_string_lossy(entry);
         if entry.starts_with('=') {
             continue;
         }
@@ -347,6 +340,10 @@ fn unavailable_or_error<T>(error: io::Error) -> io::Result<Option<T>> {
         }
         _ => Err(error),
     }
+}
+
+fn wide_to_string_lossy(value: &[u16]) -> String {
+    String::from_utf16_lossy(value)
 }
 
 #[cfg(test)]
@@ -376,5 +373,19 @@ mod tests {
         let environment = environment_from_wide_block(&block).expect("environment");
 
         assert!(environment.is_empty());
+    }
+
+    #[test]
+    fn parses_environment_entries_lossily_when_windows_returns_invalid_utf16() {
+        let mut block: Vec<u16> = "RMUX_BAD=".encode_utf16().collect();
+        block.push(0xD800);
+        block.extend("X\0\0".encode_utf16());
+
+        let environment = environment_from_wide_block(&block).expect("environment");
+
+        assert_eq!(
+            environment.get("RMUX_BAD").map(String::as_str),
+            Some("\u{FFFD}X")
+        );
     }
 }

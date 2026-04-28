@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 #[cfg(windows)]
 use std::env;
+#[cfg(windows)]
+use std::ffi::OsStr;
 #[cfg(unix)]
 use std::fs;
 #[cfg(windows)]
@@ -83,11 +85,17 @@ fn find_shell_on_path(path: &Path) -> Option<PathBuf> {
 #[cfg(windows)]
 fn search_path(path: &Path) -> Option<PathBuf> {
     let path_value = env::var_os("PATH")?;
-    let extensions = executable_extensions(path);
-    for directory in env::split_paths(&path_value) {
+    let pathext = env::var_os("PATHEXT");
+    search_path_in(path, path_value.as_os_str(), pathext.as_deref())
+}
+
+#[cfg(windows)]
+fn search_path_in(path: &Path, path_value: &OsStr, pathext: Option<&OsStr>) -> Option<PathBuf> {
+    let extensions = executable_extensions(path, pathext);
+    for directory in env::split_paths(path_value) {
         for extension in &extensions {
             let candidate = directory.join(format!("{}{}", path.to_string_lossy(), extension));
-            if candidate.is_file() {
+            if candidate.is_file() && is_usable_shell_candidate(&candidate) {
                 return Some(candidate);
             }
         }
@@ -96,12 +104,21 @@ fn search_path(path: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(windows)]
-fn executable_extensions(path: &Path) -> Vec<String> {
+fn is_usable_shell_candidate(path: &Path) -> bool {
+    // WindowsApps entries are app-execution aliases; CreateProcessW can reject
+    // their package paths with AccessDenied when they are used as ConPTY shells.
+    !path
+        .components()
+        .any(|component| component.as_os_str().eq_ignore_ascii_case("WindowsApps"))
+}
+
+#[cfg(windows)]
+fn executable_extensions(path: &Path, pathext: Option<&OsStr>) -> Vec<String> {
     if path.extension().is_some() {
         return vec![String::new()];
     }
 
-    env::var_os("PATHEXT")
+    pathext
         .map(|value| {
             value
                 .to_string_lossy()
@@ -165,4 +182,61 @@ fn cmd_shell_path() -> Option<PathBuf> {
     env::var_os("COMSPEC").map(PathBuf::from).or_else(|| {
         env::var_os("SystemRoot").map(|root| PathBuf::from(root).join("System32").join("cmd.exe"))
     })
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+    use std::fs;
+
+    #[test]
+    fn search_path_skips_windowsapps_alias_candidates() {
+        let root = unique_test_dir("windowsapps-alias");
+        let windows_apps = root.join("WindowsApps");
+        let regular_bin = root.join("regular-bin");
+        fs::create_dir_all(&windows_apps).expect("windowsapps test directory");
+        fs::create_dir_all(&regular_bin).expect("regular test directory");
+        fs::write(windows_apps.join("pwsh.exe"), b"").expect("windowsapps pwsh default_value");
+        fs::write(regular_bin.join("pwsh.exe"), b"").expect("regular pwsh default_value");
+        let path = env::join_paths([windows_apps.as_os_str(), regular_bin.as_os_str()])
+            .expect("joined PATH");
+
+        let resolved = search_path_in(
+            Path::new("pwsh.exe"),
+            path.as_os_str(),
+            Some(OsStr::new(".EXE")),
+        )
+        .expect("regular pwsh should resolve");
+
+        assert_eq!(resolved, regular_bin.join("pwsh.exe"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn search_path_rejects_only_windowsapps_alias_candidates() {
+        let root = unique_test_dir("only-windowsapps");
+        let windows_apps = root.join("WindowsApps");
+        fs::create_dir_all(&windows_apps).expect("windowsapps test directory");
+        fs::write(windows_apps.join("pwsh.exe"), b"").expect("windowsapps pwsh default_value");
+        let path = env::join_paths([windows_apps.as_os_str()]).expect("joined PATH");
+
+        let resolved = search_path_in(
+            Path::new("pwsh.exe"),
+            path.as_os_str(),
+            Some(OsStr::new(".EXE")),
+        );
+
+        assert_eq!(resolved, None);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn unique_test_dir(label: &str) -> PathBuf {
+        let path = env::temp_dir().join(format!(
+            "rmux-shell-resolver-{label}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&path);
+        path
+    }
 }

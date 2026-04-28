@@ -153,6 +153,15 @@ async fn attach_session_upgrade_renders_only_the_active_window() {
         render_frame.contains("visible-active-pane"),
         "attach must replay the active pane screen, got {render_frame:?}"
     );
+    #[cfg(windows)]
+    {
+        let host = crate::host_name::local_hostname().expect("Windows host name must resolve");
+        assert!(
+            render_frame.contains(&format!("\"{host}\"")),
+            "Windows attach status must render the host name, got {render_frame:?}"
+        );
+    }
+    #[cfg(not(windows))]
     assert!(
         render_frame.contains("\"pane-host\""),
         "attach status must render the active pane title like tmux, got {render_frame:?}"

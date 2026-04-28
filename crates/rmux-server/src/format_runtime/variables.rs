@@ -4,7 +4,9 @@ use rmux_core::{Session, Window, WINLINK_ACTIVITY, WINLINK_BELL, WINLINK_SILENCE
 
 use crate::hook_runtime::current_hook_format_value;
 
-use super::{bool_string, hostname, server_start_time, RuntimeFormatContext};
+use crate::host_name::local_hostname;
+
+use super::{bool_string, server_start_time, RuntimeFormatContext};
 
 impl FormatVariables for RuntimeFormatContext<'_> {
     fn format_value(&self, variable: FormatVariable) -> Option<String> {
@@ -140,9 +142,9 @@ impl FormatVariables for RuntimeFormatContext<'_> {
             "history_bytes" => self.pane_history_bytes(),
             "history_limit" => self.pane_history_limit(),
             "history_size" => self.pane_history_size(),
-            "host" => hostname(),
+            "host" => local_hostname(),
             "host_short" => {
-                hostname().map(|host| host.split('.').next().unwrap_or_default().to_owned())
+                local_hostname().map(|host| host.split('.').next().unwrap_or_default().to_owned())
             }
             "last_window_index" => self
                 .session

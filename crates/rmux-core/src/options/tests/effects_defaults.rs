@@ -182,6 +182,26 @@ fn status_format_array_default_resolves_three_entries_in_snapshot() {
 }
 
 #[test]
+fn status_right_default_uses_platform_title_source() {
+    let store = OptionStore::new();
+    let alpha = session_name("alpha");
+    let value = store
+        .resolve(Some(&alpha), OptionName::StatusRight)
+        .expect("status-right default resolves");
+
+    #[cfg(windows)]
+    assert!(
+        value.contains("#{=21:host_short}"),
+        "Windows status-right should show the machine name, got {value:?}"
+    );
+    #[cfg(not(windows))]
+    assert!(
+        value.contains("#{=21:pane_title}"),
+        "Unix status-right should keep tmux's pane-title default, got {value:?}"
+    );
+}
+
+#[test]
 fn empty_array_default_resolves_to_empty_string() {
     let store = OptionStore::new();
     let alpha = session_name("alpha");

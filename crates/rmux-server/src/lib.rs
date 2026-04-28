@@ -38,6 +38,8 @@ mod hook_compat;
 #[cfg_attr(windows, allow(dead_code))]
 mod hook_runtime;
 #[cfg(any(unix, windows))]
+mod host_name;
+#[cfg(any(unix, windows))]
 mod input_keys;
 #[cfg(any(unix, windows))]
 #[cfg_attr(windows, allow(dead_code))]

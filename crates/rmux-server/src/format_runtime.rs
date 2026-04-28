@@ -650,15 +650,6 @@ fn bool_string(value: bool) -> String {
     }
 }
 
-fn hostname() -> Option<String> {
-    std::env::var("HOSTNAME").ok().or_else(|| {
-        std::fs::read_to_string("/etc/hostname")
-            .ok()
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
-    })
-}
-
 fn server_start_time() -> i64 {
     *SERVER_START_TIME.get_or_init(|| Local::now().timestamp())
 }

@@ -574,7 +574,7 @@ impl HandlerState {
 }
 
 fn seed_initial_pane_title(transcript: &SharedPaneTranscript) {
-    let Some(hostname) = local_hostname() else {
+    let Some(hostname) = crate::host_name::local_hostname() else {
         return;
     };
     let mut transcript = transcript
@@ -583,17 +583,4 @@ fn seed_initial_pane_title(transcript: &SharedPaneTranscript) {
     if transcript.title().is_empty() {
         transcript.append_bytes(format!("\x1b]0;{hostname}\x07").as_bytes());
     }
-}
-
-fn local_hostname() -> Option<String> {
-    std::env::var("HOSTNAME")
-        .ok()
-        .map(|host| host.trim().to_owned())
-        .filter(|host| !host.is_empty())
-        .or_else(|| {
-            std::fs::read_to_string("/etc/hostname")
-                .ok()
-                .map(|host| host.trim().to_owned())
-                .filter(|host| !host.is_empty())
-        })
 }

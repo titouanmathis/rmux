@@ -7,9 +7,9 @@ use rmux_core::{input::mode, key_string_lookup_string};
 use rmux_proto::{
     BindKeyRequest, CopyModeRequest, ErrorResponse, ListKeysRequest, ListPanesRequest,
     NewSessionRequest, OptionName, PaneTarget, Request, Response, RmuxError, ScopeSelector,
-    SendKeysExtRequest, SendKeysRequest, SendKeysResponse, SendPrefixRequest, SetOptionMode,
-    SetOptionRequest, ShowBufferRequest, SwitchClientExtRequest, TerminalSize, UnbindKeyRequest,
-    WindowTarget,
+    SelectPaneRequest, SendKeysExtRequest, SendKeysRequest, SendKeysResponse, SendPrefixRequest,
+    SetOptionMode, SetOptionRequest, ShowBufferRequest, SplitDirection, SplitWindowRequest,
+    SplitWindowTarget, SwitchClientExtRequest, TerminalSize, UnbindKeyRequest, WindowTarget,
 };
 use std::time::Duration;
 use tokio::sync::mpsc;

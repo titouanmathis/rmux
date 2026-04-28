@@ -441,6 +441,77 @@ async fn live_attach_mouse_sequences_dispatch_default_mouse_bindings() {
 }
 
 #[tokio::test]
+async fn live_attach_mouse_down_selects_the_clicked_pane() {
+    let handler = RequestHandler::new();
+    let alpha = session_name("alpha");
+    let requester_pid = std::process::id();
+
+    let created = handler
+        .handle(Request::NewSession(NewSessionRequest {
+            session_name: alpha.clone(),
+            detached: true,
+            size: Some(TerminalSize { cols: 80, rows: 24 }),
+            environment: None,
+        }))
+        .await;
+    assert!(matches!(created, Response::NewSession(_)));
+
+    let split = handler
+        .handle(Request::SplitWindow(SplitWindowRequest {
+            target: SplitWindowTarget::Session(alpha.clone()),
+            direction: SplitDirection::Horizontal,
+            environment: None,
+        }))
+        .await;
+    assert!(matches!(split, Response::SplitWindow(_)));
+
+    let selected = handler
+        .handle(Request::SelectPane(SelectPaneRequest {
+            target: PaneTarget::new(alpha.clone(), 0),
+            title: None,
+        }))
+        .await;
+    assert!(matches!(selected, Response::SelectPane(_)));
+
+    let mouse_enabled = handler
+        .handle(Request::SetOption(SetOptionRequest {
+            scope: ScopeSelector::Global,
+            option: OptionName::Mouse,
+            value: "on".to_owned(),
+            mode: SetOptionMode::Replace,
+        }))
+        .await;
+    assert!(matches!(mouse_enabled, Response::SetOption(_)));
+
+    let (control_tx, _control_rx) = mpsc::unbounded_channel();
+    let _attach_id = handler
+        .register_attach(requester_pid, alpha.clone(), control_tx)
+        .await;
+
+    let (click_x, click_y) = {
+        let state = handler.state.lock().await;
+        let session = state.sessions.session(&alpha).expect("session exists");
+        let window = session.window();
+        assert_eq!(window.active_pane_index(), 0);
+        let pane = window.pane(1).expect("pane 1 exists");
+        (
+            pane.geometry().x().saturating_add(1),
+            pane.geometry().y().saturating_add(1),
+        )
+    };
+    let mouse_down = format!("\x1b[<0;{};{}M", click_x + 1, click_y + 1);
+
+    handler
+        .handle_attached_live_input_for_test(requester_pid, mouse_down.as_bytes())
+        .await
+        .expect("live attach mouse down input");
+
+    let state = handler.state.lock().await;
+    let session = state.sessions.session(&alpha).expect("session exists");
+    assert_eq!(session.window().active_pane_index(), 1);
+}
+
+#[tokio::test]
 async fn live_attach_sgr_wheel_forwards_when_pane_mouse_any_is_enabled() {
     let handler = RequestHandler::new();
     let alpha = session_name("alpha");

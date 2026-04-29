@@ -13,7 +13,8 @@ pub mod response;
 pub mod types;
 
 pub use attach::{
-    encode_attach_message, AttachFrameDecoder, AttachMessage, AttachedKeystroke, KeyDispatched,
+    encode_attach_message, AttachFrameDecoder, AttachMessage, AttachShellCommand,
+    AttachedKeystroke, KeyDispatched,
 };
 pub use codec::{decode_frame, encode_frame, FrameDecoder, DEFAULT_MAX_FRAME_LENGTH};
 pub use control::{

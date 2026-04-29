@@ -96,9 +96,11 @@ fn take_render_frame(control: AttachControl) -> String {
         AttachControl::Exited => panic!("expected a switch refresh"),
         AttachControl::DetachKill => panic!("expected a switch refresh"),
         AttachControl::DetachExec(_) => panic!("expected a switch refresh"),
+        AttachControl::DetachExecShellCommand(_) => panic!("expected a switch refresh"),
         AttachControl::Overlay(_) => panic!("expected a switch refresh"),
         AttachControl::Write(_) => panic!("expected a switch refresh"),
         AttachControl::Lock(_) => panic!("expected a switch refresh"),
+        AttachControl::LockShellCommand(_) => panic!("expected a switch refresh"),
         AttachControl::AdvancePersistentOverlayState(_) => panic!("expected a switch refresh"),
         AttachControl::Suspend => panic!("expected a switch refresh"),
     }

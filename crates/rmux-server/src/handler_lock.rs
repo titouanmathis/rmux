@@ -155,6 +155,9 @@ impl RequestHandler {
         if command.is_empty() {
             return Ok(None);
         }
+        let command = self
+            .attach_shell_command_for_session(&session_name, command)
+            .await?;
         let mut active_attach = self.active_attach.lock().await;
         let Some(active) = active_attach.by_pid.get_mut(&attach_pid) else {
             return Ok(None);
@@ -165,7 +168,7 @@ impl RequestHandler {
         active.suspended = true;
         if active
             .control_tx
-            .send(AttachControl::Lock(command))
+            .send(AttachControl::LockShellCommand(command))
             .is_err()
         {
             active_attach.by_pid.remove(&attach_pid);

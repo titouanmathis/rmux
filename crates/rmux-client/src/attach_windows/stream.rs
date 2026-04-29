@@ -212,10 +212,20 @@ where
             }
             AttachMessage::DetachExec(command) => {
                 locked.lock();
+                send_attach_action(action_tx, AttachAction::LegacyDetachExec(command))?;
+                *pending_actions += 1;
+            }
+            AttachMessage::DetachExecShellCommand(command) => {
+                locked.lock();
                 send_attach_action(action_tx, AttachAction::DetachExec(command))?;
                 *pending_actions += 1;
             }
             AttachMessage::Lock(command) => {
+                locked.lock();
+                send_attach_action(action_tx, AttachAction::LegacyLock(command))?;
+                *pending_actions += 1;
+            }
+            AttachMessage::LockShellCommand(command) => {
                 locked.lock();
                 send_attach_action(action_tx, AttachAction::Lock(command))?;
                 *pending_actions += 1;

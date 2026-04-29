@@ -378,6 +378,14 @@ where
                             ClientError::Io(io::Error::other("lock request receiver closed"))
                         })?;
                 }
+                AttachMessage::LockShellCommand(command) => {
+                    locked.store(true, Ordering::SeqCst);
+                    action_tx
+                        .send(ClientAttachAction::Lock(command.command().to_owned()))
+                        .map_err(|_| {
+                            ClientError::Io(io::Error::other("lock request receiver closed"))
+                        })?;
+                }
                 AttachMessage::Suspend => {
                     locked.store(true, Ordering::SeqCst);
                     action_tx.send(ClientAttachAction::Suspend).map_err(|_| {
@@ -397,6 +405,15 @@ where
                     closed.store(true, Ordering::SeqCst);
                     action_tx
                         .send(ClientAttachAction::DetachExec(command))
+                        .map_err(|_| {
+                            ClientError::Io(io::Error::other("detach request receiver closed"))
+                        })?;
+                    return Ok(());
+                }
+                AttachMessage::DetachExecShellCommand(command) => {
+                    closed.store(true, Ordering::SeqCst);
+                    action_tx
+                        .send(ClientAttachAction::DetachExec(command.command().to_owned()))
                         .map_err(|_| {
                             ClientError::Io(io::Error::other("detach request receiver closed"))
                         })?;

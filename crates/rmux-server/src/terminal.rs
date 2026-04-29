@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use rmux_core::{EnvironmentStore, OptionStore, PaneId};
-use rmux_proto::{OptionName, RmuxError, SessionName};
+use rmux_proto::{AttachShellCommand, OptionName, RmuxError, SessionName};
 use rmux_pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize as PtyTerminalSize};
 use tokio::runtime::Handle;
 
@@ -179,6 +179,14 @@ impl TerminalProfile {
 
     pub(crate) fn shell_std_command(&self, command: &str) -> Command {
         shell_std_command(&self.shell, &self.cwd, command)
+    }
+
+    pub(crate) fn attach_shell_command(&self, command: String) -> AttachShellCommand {
+        AttachShellCommand::new(
+            command,
+            self.shell.to_string_lossy().into_owned(),
+            self.cwd.to_string_lossy().into_owned(),
+        )
     }
 
     pub(crate) fn shell_child_command(&self, command: &str) -> ChildCommand {

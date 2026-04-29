@@ -1,5 +1,5 @@
 use rmux_core::PaneId;
-use rmux_proto::TerminalSize;
+use rmux_proto::{AttachShellCommand, TerminalSize};
 use rmux_pty::PtyMaster;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
@@ -21,11 +21,13 @@ pub(crate) enum AttachControl {
     Exited,
     DetachKill,
     DetachExec(String),
+    DetachExecShellCommand(AttachShellCommand),
     Switch(Box<AttachTarget>),
     AdvancePersistentOverlayState(u64),
     Overlay(OverlayFrame),
     Write(Vec<u8>),
     Lock(String),
+    LockShellCommand(AttachShellCommand),
     Suspend,
 }
 

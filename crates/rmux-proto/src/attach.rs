@@ -12,6 +12,8 @@ const DETACH_KILL_TAG: u8 = 6;
 const DETACH_EXEC_TAG: u8 = 7;
 const KEYSTROKE_TAG: u8 = 8;
 const KEY_DISPATCHED_TAG: u8 = 9;
+const LOCK_SHELL_COMMAND_TAG: u8 = 10;
+const DETACH_EXEC_SHELL_COMMAND_TAG: u8 = 11;
 const DATA_HEADER_LEN: usize = 5;
 const RESIZE_FRAME_LEN: usize = 5;
 const SINGLE_TAG_FRAME_LEN: usize = 1;
@@ -75,6 +77,44 @@ impl KeyDispatched {
     }
 }
 
+/// A local command request with the server-resolved shell context.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachShellCommand {
+    command: String,
+    shell: String,
+    cwd: String,
+}
+
+impl AttachShellCommand {
+    /// Creates a local command request that must run through `shell` in `cwd`.
+    #[must_use]
+    pub fn new(command: String, shell: String, cwd: String) -> Self {
+        Self {
+            command,
+            shell,
+            cwd,
+        }
+    }
+
+    /// Returns the tmux command payload to pass to the shell.
+    #[must_use]
+    pub fn command(&self) -> &str {
+        &self.command
+    }
+
+    /// Returns the server-resolved shell executable path.
+    #[must_use]
+    pub fn shell(&self) -> &str {
+        &self.shell
+    }
+
+    /// Returns the server-resolved command working directory.
+    #[must_use]
+    pub fn cwd(&self) -> &str {
+        &self.cwd
+    }
+}
+
 /// All message types supported after the attach upgrade boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttachMessage {
@@ -88,6 +128,9 @@ pub enum AttachMessage {
     Resize(TerminalSize),
     /// A request for the client to run the configured lock command locally.
     Lock(String),
+    /// A request for the client to run the configured lock command through the
+    /// server-resolved shell profile.
+    LockShellCommand(AttachShellCommand),
     /// A notification that the local lock command has completed.
     Unlock,
     /// A request for the client to suspend itself and later resume in raw mode.
@@ -96,6 +139,9 @@ pub enum AttachMessage {
     DetachKill,
     /// A request for the client to run a shell command locally before detaching.
     DetachExec(String),
+    /// A request for the client to run a shell command locally before detaching
+    /// through the server-resolved shell profile.
+    DetachExecShellCommand(AttachShellCommand),
 }
 
 /// Encodes a single attach-stream message.
@@ -108,11 +154,17 @@ pub fn encode_attach_message(message: &AttachMessage) -> Result<Vec<u8>, RmuxErr
         }
         AttachMessage::Resize(size) => Ok(encode_resize_message(*size)),
         AttachMessage::Lock(command) => encode_data_like_message(LOCK_TAG, command.as_bytes()),
+        AttachMessage::LockShellCommand(command) => {
+            encode_structured_message(LOCK_SHELL_COMMAND_TAG, command)
+        }
         AttachMessage::Unlock => Ok(vec![UNLOCK_TAG]),
         AttachMessage::Suspend => Ok(vec![SUSPEND_TAG]),
         AttachMessage::DetachKill => Ok(vec![DETACH_KILL_TAG]),
         AttachMessage::DetachExec(command) => {
             encode_data_like_message(DETACH_EXEC_TAG, command.as_bytes())
+        }
+        AttachMessage::DetachExecShellCommand(command) => {
+            encode_structured_message(DETACH_EXEC_SHELL_COMMAND_TAG, command)
         }
     }
 }
@@ -161,6 +213,8 @@ impl AttachFrameDecoder {
             DETACH_EXEC_TAG => self.next_detach_exec_message(),
             KEYSTROKE_TAG => self.next_keystroke_message(),
             KEY_DISPATCHED_TAG => self.next_key_dispatched_message(),
+            LOCK_SHELL_COMMAND_TAG => self.next_lock_shell_command_message(),
+            DETACH_EXEC_SHELL_COMMAND_TAG => self.next_detach_exec_shell_command_message(),
             other => {
                 self.buffer.clear();
                 Err(RmuxError::Decode(format!(
@@ -224,6 +278,11 @@ impl AttachFrameDecoder {
         })
     }
 
+    fn next_lock_shell_command_message(&mut self) -> Result<Option<AttachMessage>, RmuxError> {
+        self.next_structured_message(LOCK_SHELL_COMMAND_TAG)
+            .map(|message| message.map(AttachMessage::LockShellCommand))
+    }
+
     fn next_unlock_message(&mut self) -> Result<Option<AttachMessage>, RmuxError> {
         if self.buffer.len() < SINGLE_TAG_FRAME_LEN {
             return Ok(None);
@@ -274,6 +333,13 @@ impl AttachFrameDecoder {
                 AttachMessage::DetachExec(String::from_utf8_lossy(&bytes).into_owned())
             })
         })
+    }
+
+    fn next_detach_exec_shell_command_message(
+        &mut self,
+    ) -> Result<Option<AttachMessage>, RmuxError> {
+        self.next_structured_message(DETACH_EXEC_SHELL_COMMAND_TAG)
+            .map(|message| message.map(AttachMessage::DetachExecShellCommand))
     }
 
     fn next_keystroke_message(&mut self) -> Result<Option<AttachMessage>, RmuxError> {
@@ -382,169 +448,5 @@ fn encode_resize_message(size: TerminalSize) -> Vec<u8> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        encode_attach_message, AttachFrameDecoder, AttachMessage, AttachedKeystroke, KeyDispatched,
-    };
-    use crate::{RmuxError, TerminalSize};
-
-    #[test]
-    fn data_messages_round_trip() {
-        let message = AttachMessage::Data(b"hello".to_vec());
-        let encoded = encode_attach_message(&message).expect("encode attach message");
-        let mut decoder = AttachFrameDecoder::new();
-        decoder.push_bytes(&encoded);
-
-        assert_eq!(
-            decoder.next_message().expect("decode attach message"),
-            Some(message)
-        );
-        assert_eq!(
-            decoder.next_message().expect("buffer should be empty"),
-            None
-        );
-    }
-
-    #[test]
-    fn resize_messages_round_trip() {
-        let message = AttachMessage::Resize(TerminalSize {
-            cols: 120,
-            rows: 40,
-        });
-        let encoded = encode_attach_message(&message).expect("encode attach resize");
-        let mut decoder = AttachFrameDecoder::new();
-        decoder.push_bytes(&encoded);
-
-        assert_eq!(
-            decoder.next_message().expect("decode attach resize"),
-            Some(message)
-        );
-    }
-
-    #[test]
-    fn keystroke_messages_round_trip() {
-        let message = AttachMessage::Keystroke(AttachedKeystroke::new(b"\x1b[A".to_vec()));
-        let encoded = encode_attach_message(&message).expect("encode attach keystroke");
-        let mut decoder = AttachFrameDecoder::new();
-        decoder.push_bytes(&encoded);
-
-        assert_eq!(
-            decoder.next_message().expect("decode attach keystroke"),
-            Some(message)
-        );
-    }
-
-    #[test]
-    fn key_dispatched_messages_round_trip() {
-        let message = AttachMessage::KeyDispatched(KeyDispatched::new(3));
-        let encoded = encode_attach_message(&message).expect("encode attach key dispatch ack");
-        let mut decoder = AttachFrameDecoder::new();
-        decoder.push_bytes(&encoded);
-
-        assert_eq!(
-            decoder
-                .next_message()
-                .expect("decode attach key dispatch ack"),
-            Some(message)
-        );
-    }
-
-    #[test]
-    fn lock_messages_round_trip() {
-        let message = AttachMessage::Lock("lock-command".to_owned());
-        let encoded = encode_attach_message(&message).expect("encode attach lock");
-        let mut decoder = AttachFrameDecoder::new();
-        decoder.push_bytes(&encoded);
-
-        assert_eq!(
-            decoder.next_message().expect("decode attach lock"),
-            Some(message)
-        );
-    }
-
-    #[test]
-    fn unlock_messages_round_trip() {
-        let message = AttachMessage::Unlock;
-        let encoded = encode_attach_message(&message).expect("encode attach unlock");
-        let mut decoder = AttachFrameDecoder::new();
-        decoder.push_bytes(&encoded);
-
-        assert_eq!(
-            decoder.next_message().expect("decode attach unlock"),
-            Some(message)
-        );
-    }
-
-    #[test]
-    fn decoder_handles_fragmented_messages() {
-        let message = AttachMessage::Data(b"fragmented".to_vec());
-        let encoded = encode_attach_message(&message).expect("encode attach message");
-        let mut decoder = AttachFrameDecoder::new();
-
-        decoder.push_bytes(&encoded[..3]);
-        assert_eq!(
-            decoder
-                .next_message()
-                .expect("partial message should not fail"),
-            None
-        );
-
-        decoder.push_bytes(&encoded[3..]);
-        assert_eq!(
-            decoder.next_message().expect("fragment should decode"),
-            Some(message)
-        );
-    }
-
-    #[test]
-    fn suspend_messages_round_trip() {
-        let message = AttachMessage::Suspend;
-        let encoded = encode_attach_message(&message).expect("encode attach suspend");
-        let mut decoder = AttachFrameDecoder::new();
-        decoder.push_bytes(&encoded);
-
-        assert_eq!(
-            decoder.next_message().expect("decode attach suspend"),
-            Some(message)
-        );
-    }
-
-    #[test]
-    fn detach_kill_messages_round_trip() {
-        let message = AttachMessage::DetachKill;
-        let encoded = encode_attach_message(&message).expect("encode attach detach-kill");
-        let mut decoder = AttachFrameDecoder::new();
-        decoder.push_bytes(&encoded);
-
-        assert_eq!(
-            decoder.next_message().expect("decode attach detach-kill"),
-            Some(message)
-        );
-    }
-
-    #[test]
-    fn detach_exec_messages_round_trip() {
-        let message = AttachMessage::DetachExec("exec /bin/bash".to_owned());
-        let encoded = encode_attach_message(&message).expect("encode attach detach-exec");
-        let mut decoder = AttachFrameDecoder::new();
-        decoder.push_bytes(&encoded);
-
-        assert_eq!(
-            decoder.next_message().expect("decode attach detach-exec"),
-            Some(message)
-        );
-    }
-
-    #[test]
-    fn decoder_rejects_unknown_tags() {
-        let mut decoder = AttachFrameDecoder::new();
-        decoder.push_bytes(&[10, 0, 0, 0, 0]);
-
-        assert_eq!(
-            decoder.next_message(),
-            Err(RmuxError::Decode(
-                "unknown attach-stream message tag 10".to_owned()
-            ))
-        );
-    }
-}
+#[path = "attach/tests.rs"]
+mod tests;

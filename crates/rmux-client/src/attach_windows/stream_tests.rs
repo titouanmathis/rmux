@@ -2,7 +2,9 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rmux_proto::{encode_attach_message, AttachFrameDecoder, AttachMessage, AttachedKeystroke};
+use rmux_proto::{
+    encode_attach_message, AttachFrameDecoder, AttachMessage, AttachShellCommand, AttachedKeystroke,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
@@ -17,6 +19,35 @@ async fn lock_request_runs_action_and_sends_unlock() -> Result<(), Box<dyn std::
     let mut server = scenario.take_server();
 
     write_server_message(&mut server, AttachMessage::Lock("echo locked".to_owned())).await?;
+
+    assert_eq!(
+        read_client_message(&mut server).await?,
+        AttachMessage::Unlock
+    );
+
+    write_server_message(&mut server, AttachMessage::DetachKill).await?;
+    scenario.join().await?;
+
+    assert_eq!(actions.calls(), vec!["lock:echo locked", "detach-kill"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn lock_shell_request_runs_action_and_sends_unlock() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mut scenario = AttachScenario::new(RecordingActions::default());
+    let actions = scenario.actions.clone();
+    let mut server = scenario.take_server();
+
+    write_server_message(
+        &mut server,
+        AttachMessage::LockShellCommand(AttachShellCommand::new(
+            "echo locked".to_owned(),
+            "pwsh.exe".to_owned(),
+            r"C:\work".to_owned(),
+        )),
+    )
+    .await?;
 
     assert_eq!(
         read_client_message(&mut server).await?,
@@ -59,6 +90,27 @@ async fn detach_exec_runs_action_before_exit() -> Result<(), Box<dyn std::error:
     write_server_message(
         &mut server,
         AttachMessage::DetachExec("echo bye".to_owned()),
+    )
+    .await?;
+    scenario.join().await?;
+
+    assert_eq!(actions.calls(), vec!["detach-exec:echo bye"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn detach_exec_shell_runs_action_before_exit() -> Result<(), Box<dyn std::error::Error>> {
+    let mut scenario = AttachScenario::new(RecordingActions::default());
+    let actions = scenario.actions.clone();
+    let mut server = scenario.take_server();
+
+    write_server_message(
+        &mut server,
+        AttachMessage::DetachExecShellCommand(AttachShellCommand::new(
+            "echo bye".to_owned(),
+            "pwsh.exe".to_owned(),
+            r"C:\work".to_owned(),
+        )),
     )
     .await?;
     scenario.join().await?;
@@ -329,7 +381,18 @@ impl RecordingActions {
 }
 
 impl AttachActionExecutor for RecordingActions {
-    fn handle_lock(&mut self, command: &str) -> std::result::Result<(), crate::ClientError> {
+    fn handle_lock(
+        &mut self,
+        command: &AttachShellCommand,
+    ) -> std::result::Result<(), crate::ClientError> {
+        self.push(format!("lock:{}", command.command()));
+        if !self.lock_blocks_for.is_zero() {
+            std::thread::sleep(self.lock_blocks_for);
+        }
+        Ok(())
+    }
+
+    fn handle_legacy_lock(&mut self, command: &str) -> std::result::Result<(), crate::ClientError> {
         self.push(format!("lock:{command}"));
         if !self.lock_blocks_for.is_zero() {
             std::thread::sleep(self.lock_blocks_for);
@@ -347,7 +410,18 @@ impl AttachActionExecutor for RecordingActions {
         Ok(())
     }
 
-    fn handle_detach_exec(&mut self, command: &str) -> std::result::Result<(), crate::ClientError> {
+    fn handle_detach_exec(
+        &mut self,
+        command: &AttachShellCommand,
+    ) -> std::result::Result<(), crate::ClientError> {
+        self.push(format!("detach-exec:{}", command.command()));
+        Ok(())
+    }
+
+    fn handle_legacy_detach_exec(
+        &mut self,
+        command: &str,
+    ) -> std::result::Result<(), crate::ClientError> {
         self.push(format!("detach-exec:{command}"));
         Ok(())
     }

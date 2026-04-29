@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::time::Duration;
 
-use rmux_proto::{AttachedKeystroke, KeyDispatched, PaneTarget, TerminalSize};
+use rmux_proto::{AttachShellCommand, AttachedKeystroke, KeyDispatched, PaneTarget, TerminalSize};
 #[cfg(test)]
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -19,6 +19,7 @@ use crate::pane_terminals::{session_not_found, HandlerState};
 use crate::renderer;
 #[cfg(test)]
 use crate::server_access::current_owner_uid;
+use crate::terminal::TerminalProfile;
 
 #[path = "handler_attach/key_table.rs"]
 mod key_table;
@@ -255,6 +256,41 @@ impl RequestHandler {
             .map(|active| (active.terminal_context.clone(), active.client_size))
     }
 
+    pub(super) async fn attached_session_name_for_command(
+        &self,
+        attach_pid: u32,
+        command_name: &str,
+    ) -> Result<rmux_proto::SessionName, rmux_proto::RmuxError> {
+        let active_attach = self.active_attach.lock().await;
+        active_attach
+            .by_pid
+            .get(&attach_pid)
+            .map(|active| active.session_name.clone())
+            .ok_or_else(|| attached_client_required(command_name))
+    }
+
+    pub(super) async fn attach_shell_command_for_session(
+        &self,
+        session_name: &rmux_proto::SessionName,
+        command: String,
+    ) -> Result<AttachShellCommand, rmux_proto::RmuxError> {
+        let state = self.state.lock().await;
+        let session_id = state
+            .sessions
+            .session(session_name)
+            .map(|session| session.id());
+        let profile = TerminalProfile::for_run_shell(
+            &state.environment,
+            &state.options,
+            Some(session_name),
+            session_id,
+            &self.socket_path(),
+            !self.config_loading_active(),
+            None,
+        )?;
+        Ok(profile.attach_shell_command(command))
+    }
+
     pub(super) async fn clipboard_attach_for_requester(
         &self,
         requester_pid: u32,
@@ -282,6 +318,7 @@ impl RequestHandler {
                 | AttachControl::Exited
                 | AttachControl::DetachKill
                 | AttachControl::DetachExec(_)
+                | AttachControl::DetachExecShellCommand(_)
         );
         let mut active_attach = self.active_attach.lock().await;
         let Some(active) = active_attach.by_pid.get_mut(&attach_pid) else {
@@ -298,6 +335,7 @@ impl RequestHandler {
                 | AttachControl::Exited
                 | AttachControl::DetachKill
                 | AttachControl::DetachExec(_)
+                | AttachControl::DetachExecShellCommand(_)
         ) {
             active.closing.store(true, Ordering::SeqCst);
         }

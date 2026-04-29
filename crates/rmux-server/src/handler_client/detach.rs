@@ -15,7 +15,13 @@ impl RequestHandler {
         command_name: &str,
     ) -> Result<rmux_proto::SessionName, RmuxError> {
         let control = if let Some(command) = exec_command {
-            AttachControl::DetachExec(command)
+            let session_name = self
+                .attached_session_name_for_command(attach_pid, command_name)
+                .await?;
+            let command = self
+                .attach_shell_command_for_session(&session_name, command)
+                .await?;
+            AttachControl::DetachExecShellCommand(command)
         } else if kill_on_detach {
             AttachControl::DetachKill
         } else {

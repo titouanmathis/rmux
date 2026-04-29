@@ -189,18 +189,6 @@ fn resize_deduper_reports_only_real_size_changes() {
     );
 }
 
-#[test]
-fn windows_command_shell_preserves_command_payload_as_one_arg() {
-    let command = "echo lock command && exit /b 0";
-    let child = windows_command_shell(command);
-    let args = child
-        .get_args()
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
-
-    assert_eq!(args, vec!["/D", "/C", command]);
-}
-
 #[derive(Clone, Debug)]
 struct FakeConsole {
     state: Rc<RefCell<FakeConsoleState>>,

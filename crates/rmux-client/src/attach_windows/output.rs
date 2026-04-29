@@ -92,9 +92,14 @@ impl Utf16ConsoleWriter {
         if self.pending_utf8.is_empty() {
             return Ok(());
         }
-        let text = String::from_utf8_lossy(&self.pending_utf8);
+        let valid_len = writable_utf8_prefix_len(&self.pending_utf8);
+        if valid_len == 0 {
+            return Ok(());
+        }
+
+        let text = String::from_utf8_lossy(&self.pending_utf8[..valid_len]);
         self.write_text(&text)?;
-        self.pending_utf8.clear();
+        self.pending_utf8.drain(..valid_len);
         Ok(())
     }
 
@@ -141,7 +146,7 @@ fn writable_utf8_prefix_len(bytes: &[u8]) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::writable_utf8_prefix_len;
+    use super::{writable_utf8_prefix_len, Utf16ConsoleWriter};
 
     #[test]
     fn utf8_prefix_waits_for_split_codepoint() {
@@ -154,5 +159,18 @@ mod tests {
     fn utf8_prefix_allows_ascii_escape_sequences() {
         let bytes = b"\x1b[31mhello\x1b[0m";
         assert_eq!(writable_utf8_prefix_len(bytes), bytes.len());
+    }
+
+    #[test]
+    fn flush_keeps_split_codepoint_pending() {
+        let glyph = "é".as_bytes();
+        let mut writer = Utf16ConsoleWriter {
+            handle: std::ptr::null_mut(),
+            pending_utf8: glyph[..1].to_vec(),
+        };
+
+        writer.flush_pending().expect("split utf8 waits");
+
+        assert_eq!(writer.pending_utf8, glyph[..1]);
     }
 }

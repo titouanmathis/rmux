@@ -26,6 +26,8 @@ mod metrics;
 mod output;
 #[path = "attach/screen.rs"]
 mod screen;
+#[path = "attach_windows/shell_command.rs"]
+mod shell_command;
 #[path = "attach_windows/stream.rs"]
 mod stream;
 #[path = "attach_windows/terminal.rs"]

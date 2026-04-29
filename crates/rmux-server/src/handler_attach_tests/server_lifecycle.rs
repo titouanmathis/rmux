@@ -37,6 +37,7 @@ async fn lock_client_emits_lock_control_before_refresh() {
     );
 
     match control_rx.recv().await {
+        Some(AttachControl::LockShellCommand(command)) => assert!(!command.command().is_empty()),
         Some(AttachControl::Lock(command)) => assert!(!command.is_empty()),
         Some(other) => panic!("expected lock control, got {other:?}"),
         None => panic!("attach control closed"),
@@ -68,7 +69,7 @@ async fn lock_server_skips_already_suspended_clients() {
         .await;
     assert!(matches!(first_lock, Response::LockServer(_)));
     match control_rx.try_recv() {
-        Ok(AttachControl::Lock(_)) => {}
+        Ok(AttachControl::LockShellCommand(_)) | Ok(AttachControl::Lock(_)) => {}
         other => panic!("expected Lock control from first lock-server, got {other:?}"),
     }
     assert!(

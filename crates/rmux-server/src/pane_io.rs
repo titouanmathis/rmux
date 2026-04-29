@@ -279,6 +279,15 @@ pub(crate) async fn forward_attach(
                             emit_attach_message(&stream, &AttachMessage::DetachExec(command)).await?;
                             return Ok(());
                         }
+                        Some(AttachControl::DetachExecShellCommand(command)) => {
+                            emit_attach_stop(&stream, &current_target).await?;
+                            emit_attach_message(
+                                &stream,
+                                &AttachMessage::DetachExecShellCommand(command),
+                            )
+                            .await?;
+                            return Ok(());
+                        }
                         Some(AttachControl::Switch(next_target)) => {
                             if is_stale_persistent_switch(
                                 persistent_overlay_state_id,
@@ -408,6 +417,11 @@ pub(crate) async fn forward_attach(
                         Some(AttachControl::Lock(command)) => {
                             locked = true;
                             emit_attach_message(&stream, &AttachMessage::Lock(command)).await?;
+                        }
+                        Some(AttachControl::LockShellCommand(command)) => {
+                            locked = true;
+                            emit_attach_message(&stream, &AttachMessage::LockShellCommand(command))
+                                .await?;
                         }
                         Some(AttachControl::Suspend) => {
                             locked = true;
@@ -556,12 +570,15 @@ async fn process_socket_messages(
                     .await
                     .map_err(io::Error::other)?;
             }
-            AttachMessage::Lock(_) => {
+            AttachMessage::Lock(_) | AttachMessage::LockShellCommand(_) => {
                 return Err(io::Error::other(
                     "received unexpected lock message from attach client",
                 ));
             }
-            AttachMessage::Suspend | AttachMessage::DetachKill | AttachMessage::DetachExec(_) => {
+            AttachMessage::Suspend
+            | AttachMessage::DetachKill
+            | AttachMessage::DetachExec(_)
+            | AttachMessage::DetachExecShellCommand(_) => {
                 return Err(io::Error::other(
                     "received unexpected control action from attach client",
                 ));

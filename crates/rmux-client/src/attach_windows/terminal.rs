@@ -1,8 +1,7 @@
 use std::error::Error as StdError;
 use std::fmt;
 use std::io::{self, Write};
-use std::mem::MaybeUninit;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -10,22 +9,23 @@ use std::thread;
 use std::time::Duration;
 
 use rmux_core::{alternate_screen_enter_sequence, alternate_screen_exit_sequence};
-use rmux_proto::TerminalSize;
+use rmux_proto::{AttachShellCommand, TerminalSize};
 use tokio::sync::mpsc;
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_INVALID_HANDLE, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::System::Console::{
-    FlushConsoleInputBuffer, GetConsoleMode, GetConsoleScreenBufferInfo, GetStdHandle,
-    PeekConsoleInputW, ReadConsoleInputW, SetConsoleCtrlHandler, SetConsoleMode,
+    FlushConsoleInputBuffer, GetConsoleMode, GetConsoleScreenBufferInfo,
+    GetNumberOfConsoleInputEvents, GetStdHandle, SetConsoleCtrlHandler, SetConsoleMode,
     CONSOLE_SCREEN_BUFFER_INFO, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT,
     CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT, DISABLE_NEWLINE_AUTO_RETURN, ENABLE_ECHO_INPUT,
     ENABLE_EXTENDED_FLAGS, ENABLE_INSERT_MODE, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
     ENABLE_QUICK_EDIT_MODE, ENABLE_VIRTUAL_TERMINAL_INPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
-    INPUT_RECORD, KEY_EVENT, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
 };
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
+use super::shell_command::{command_from_legacy, command_from_spec};
 use super::terminal_cleanup::fallback_attach_stop_sequence;
 
 /// Result type for raw-terminal lifecycle operations.
@@ -90,9 +90,24 @@ impl RawTerminal {
         self.inner.restore()
     }
 
-    pub(super) fn run_lock_command(&self, command: &str) -> Result<()> {
+    pub(super) fn run_lock_command(&self, command: &AttachShellCommand) -> Result<()> {
         self.restore()?;
-        let command_result = run_shell_command(command);
+        let command_result = run_shell_command(command_from_spec(command));
+        let raw_result = self
+            .inner
+            .flush_pending_input()
+            .and_then(|()| self.inner.reapply_raw_mode());
+        if let Err(error) = command_result {
+            raw_result?;
+            return Err(error);
+        }
+        raw_result?;
+        Ok(())
+    }
+
+    pub(super) fn run_legacy_lock_command(&self, command: &str) -> Result<()> {
+        self.restore()?;
+        let command_result = run_shell_command(command_from_legacy(command));
         let raw_result = self
             .inner
             .flush_pending_input()
@@ -113,9 +128,14 @@ impl RawTerminal {
         self.inner.reapply_raw_mode()
     }
 
-    pub(super) fn run_detach_exec_command(&self, command: &str) -> Result<()> {
+    pub(super) fn run_detach_exec_command(&self, command: &AttachShellCommand) -> Result<()> {
         self.restore()?;
-        run_shell_command(command)
+        run_shell_command(command_from_spec(command))
+    }
+
+    pub(super) fn run_legacy_detach_exec_command(&self, command: &str) -> Result<()> {
+        self.restore()?;
+        run_shell_command(command_from_legacy(command))
     }
 
     pub(super) fn flush_pending_input(&self) -> Result<()> {
@@ -491,54 +511,22 @@ pub(super) fn wait_for_key_input(handle: HANDLE, timeout_ms: u32) -> io::Result<
         // SAFETY: handle is borrowed only for the duration of this wait.
         WaitForSingleObject(handle, timeout_ms)
     } {
-        WAIT_OBJECT_0 => discard_non_key_console_events(handle),
+        WAIT_OBJECT_0 => console_input_is_readable(handle),
         WAIT_TIMEOUT => Ok(false),
         _ => Err(io::Error::last_os_error()),
     }
 }
 
-fn discard_non_key_console_events(handle: HANDLE) -> io::Result<bool> {
-    loop {
-        let mut record = MaybeUninit::<INPUT_RECORD>::zeroed();
-        let mut read = 0;
-        let ok = unsafe {
-            // SAFETY: record points to writable storage for one console input record.
-            PeekConsoleInputW(handle, record.as_mut_ptr(), 1, &mut read)
-        };
-        if ok == 0 {
-            return invalid_console_input_as_readable();
-        }
-        if read == 0 {
-            return Ok(false);
-        }
-
-        let mut record = unsafe {
-            // SAFETY: PeekConsoleInputW initialized one record when read is non-zero.
-            record.assume_init()
-        };
-        if is_key_down_event(&record) {
-            return Ok(true);
-        }
-
-        let ok = unsafe {
-            // SAFETY: record is initialized and the call consumes exactly one non-key event.
-            ReadConsoleInputW(handle, &mut record, 1, &mut read)
-        };
-        if ok == 0 {
-            return invalid_console_input_as_readable();
-        }
-    }
-}
-
-fn is_key_down_event(record: &INPUT_RECORD) -> bool {
-    if u32::from(record.EventType) != KEY_EVENT {
-        return false;
-    }
-    let key = unsafe {
-        // SAFETY: EventType is KEY_EVENT, so the KeyEvent union field is active.
-        record.Event.KeyEvent
+fn console_input_is_readable(handle: HANDLE) -> io::Result<bool> {
+    let mut event_count = 0;
+    let ok = unsafe {
+        // SAFETY: handle is borrowed and event_count points to writable storage.
+        GetNumberOfConsoleInputEvents(handle, &mut event_count)
     };
-    key.bKeyDown != 0
+    if ok == 0 {
+        return invalid_console_input_as_readable();
+    }
+    Ok(event_count > 0)
 }
 
 fn invalid_console_input_as_readable() -> io::Result<bool> {
@@ -586,14 +574,14 @@ const fn raw_output_mode(original: u32) -> u32 {
     original | ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN
 }
 
-fn run_shell_command(command: &str) -> Result<()> {
+fn run_shell_command(mut child: std::process::Command) -> Result<()> {
     let mut stdout = io::stdout();
     let term = std::env::var("TERM").unwrap_or_default();
 
     stdout.write_all(alternate_screen_enter_sequence(&term))?;
     stdout.flush()?;
 
-    let status_result = windows_command_shell(command)
+    let status_result = child
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -603,13 +591,6 @@ fn run_shell_command(command: &str) -> Result<()> {
     stdout.flush()?;
     status_result.map_err(AttachError::Io)?;
     Ok(())
-}
-
-fn windows_command_shell(command: &str) -> Command {
-    let shell = std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into());
-    let mut child = Command::new(shell);
-    child.arg("/D").arg("/C").arg(command);
-    child
 }
 
 #[cfg(test)]

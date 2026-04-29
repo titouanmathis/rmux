@@ -139,6 +139,12 @@ pub(super) async fn apply_pending_attach_controls(
                 emit_attach_message(stream, &AttachMessage::DetachExec(command)).await?;
                 return Ok(PendingAttachAction::Exit);
             }
+            Ok(AttachControl::DetachExecShellCommand(command)) => {
+                emit_attach_stop(stream, current_target).await?;
+                emit_attach_message(stream, &AttachMessage::DetachExecShellCommand(command))
+                    .await?;
+                return Ok(PendingAttachAction::Exit);
+            }
             Ok(AttachControl::Switch(next_target)) => {
                 if is_stale_persistent_switch(*persistent_overlay_state_id, next_target.as_ref()) {
                     continue;
@@ -258,6 +264,11 @@ pub(super) async fn apply_pending_attach_controls(
             Ok(AttachControl::Lock(command)) => {
                 *locked = true;
                 emit_attach_message(stream, &AttachMessage::Lock(command)).await?;
+                should_drop_output = true;
+            }
+            Ok(AttachControl::LockShellCommand(command)) => {
+                *locked = true;
+                emit_attach_message(stream, &AttachMessage::LockShellCommand(command)).await?;
                 should_drop_output = true;
             }
             Ok(AttachControl::Suspend) => {

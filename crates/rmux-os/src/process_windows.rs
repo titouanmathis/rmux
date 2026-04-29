@@ -20,6 +20,7 @@ const ERROR_PARTIAL_COPY: i32 = 299;
 const ERROR_INVALID_ADDRESS: i32 = 487;
 const ERROR_NOACCESS: i32 = 998;
 const MAX_ENVIRONMENT_WIDE_CHARS: usize = 32 * 1024;
+const MAX_REMOTE_UNICODE_STRING_BYTES: usize = u16::MAX as usize - 1;
 
 pub(super) fn current_path(pid: u32) -> io::Result<Option<String>> {
     let Some(process) = RemoteProcess::open_for_query_and_read(pid)? else {
@@ -164,14 +165,11 @@ impl RemoteProcess {
     }
 
     fn read_unicode_string(&self, value: RemoteUnicodeString) -> io::Result<Option<String>> {
-        if value.length == 0 || value.buffer == 0 || !value.length.is_multiple_of(2) {
+        let Some(byte_len) = validate_remote_unicode_string(value) else {
             return Ok(None);
-        }
-        let units = usize::from(value.length) / 2;
+        };
+        let units = byte_len / size_of::<u16>();
         let mut buffer = vec![0_u16; units];
-        let byte_len = units
-            .checked_mul(size_of::<u16>())
-            .ok_or(io::ErrorKind::InvalidData)?;
         let Some(()) = self.read_exact(value.buffer, buffer.as_mut_ptr().cast(), byte_len)? else {
             return Ok(None);
         };
@@ -307,6 +305,24 @@ struct RemoteUnicodeString {
     buffer: usize,
 }
 
+fn validate_remote_unicode_string(value: RemoteUnicodeString) -> Option<usize> {
+    let byte_len = usize::from(value.length);
+    let max_byte_len = usize::from(value.maximum_length);
+    if byte_len == 0 || value.buffer == 0 {
+        return None;
+    }
+    if !byte_len.is_multiple_of(size_of::<u16>())
+        || !max_byte_len.is_multiple_of(size_of::<u16>())
+        || !value.buffer.is_multiple_of(size_of::<u16>())
+    {
+        return None;
+    }
+    if byte_len > max_byte_len || byte_len > MAX_REMOTE_UNICODE_STRING_BYTES {
+        return None;
+    }
+    Some(byte_len)
+}
+
 fn environment_from_wide_block(block: &[u16]) -> Option<HashMap<String, String>> {
     let mut environment = HashMap::new();
     for entry in block.split(|unit| *unit == 0) {
@@ -387,5 +403,45 @@ mod tests {
             environment.get("RMUX_BAD").map(String::as_str),
             Some("\u{FFFD}X")
         );
+    }
+
+    #[test]
+    fn validates_remote_unicode_string_before_remote_reads() {
+        let valid = RemoteUnicodeString {
+            length: 4,
+            maximum_length: 6,
+            buffer: 0x1000,
+        };
+        assert_eq!(validate_remote_unicode_string(valid), Some(4));
+
+        for value in [
+            RemoteUnicodeString {
+                length: 0,
+                maximum_length: 6,
+                buffer: 0x1000,
+            },
+            RemoteUnicodeString {
+                length: 3,
+                maximum_length: 6,
+                buffer: 0x1000,
+            },
+            RemoteUnicodeString {
+                length: 4,
+                maximum_length: 3,
+                buffer: 0x1000,
+            },
+            RemoteUnicodeString {
+                length: 4,
+                maximum_length: 6,
+                buffer: 0,
+            },
+            RemoteUnicodeString {
+                length: 4,
+                maximum_length: 6,
+                buffer: 0x1001,
+            },
+        ] {
+            assert_eq!(validate_remote_unicode_string(value), None);
+        }
     }
 }

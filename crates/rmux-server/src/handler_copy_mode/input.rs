@@ -63,7 +63,8 @@ pub(super) fn attached_copy_mode_input_action(
         PromptInputEvent::Left => "cursor-left",
         PromptInputEvent::Down => "cursor-down",
         PromptInputEvent::Up => "cursor-up",
-        PromptInputEvent::Char('q') | PromptInputEvent::Escape => "cancel",
+        PromptInputEvent::Char('q') => "cancel",
+        PromptInputEvent::Escape => "cancel-or-clear-selection",
         PromptInputEvent::KeyName(name) if name == "q" => "cancel",
         _ => return AttachedCopyModeInputAction::Ignore,
     };
@@ -143,6 +144,18 @@ mod tests {
         assert_eq!(
             attached_copy_mode_input_action(ModeKeys::Emacs, &PromptInputEvent::Enter),
             AttachedCopyModeInputAction::Command("copy-selection-no-clear")
+        );
+    }
+
+    #[test]
+    fn escape_uses_tmux_selection_cancel_semantics() {
+        assert_eq!(
+            attached_copy_mode_input_action(ModeKeys::Vi, &PromptInputEvent::Escape),
+            AttachedCopyModeInputAction::Command("cancel-or-clear-selection")
+        );
+        assert_eq!(
+            attached_copy_mode_input_action(ModeKeys::Emacs, &PromptInputEvent::Escape),
+            AttachedCopyModeInputAction::Command("cancel-or-clear-selection")
         );
     }
 }

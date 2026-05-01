@@ -50,6 +50,14 @@ impl CopyModeState {
             "cancel" => {
                 Ok(self.finish_policy(CopyModeCommandOutcome::cancel(), ClearPolicy::Always))
             }
+            "cancel-or-clear-selection" => {
+                if self.selection.is_some() {
+                    self.selection = None;
+                    Ok(self.finish_policy(CopyModeCommandOutcome::nothing(), ClearPolicy::Always))
+                } else {
+                    Ok(self.finish_policy(CopyModeCommandOutcome::cancel(), ClearPolicy::Always))
+                }
+            }
             "clear-selection" => {
                 self.selection = None;
                 Ok(self.finish_policy(CopyModeCommandOutcome::nothing(), ClearPolicy::Always))

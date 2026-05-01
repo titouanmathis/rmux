@@ -48,6 +48,9 @@ pub(super) fn attached_copy_mode_input_action(
             PromptInputEvent::KeyName(name) if name == "N" => {
                 return AttachedCopyModeInputAction::Command("search-reverse");
             }
+            PromptInputEvent::Enter => {
+                return AttachedCopyModeInputAction::Command("copy-selection-and-cancel");
+            }
             _ => {}
         }
     }
@@ -124,6 +127,22 @@ mod tests {
         assert_eq!(
             attached_copy_mode_input_action(ModeKeys::Emacs, &PromptInputEvent::Char('N')),
             AttachedCopyModeInputAction::Ignore
+        );
+    }
+
+    #[test]
+    fn vi_enter_yanks_selection_and_exits_copy_mode() {
+        assert_eq!(
+            attached_copy_mode_input_action(ModeKeys::Vi, &PromptInputEvent::Enter),
+            AttachedCopyModeInputAction::Command("copy-selection-and-cancel")
+        );
+    }
+
+    #[test]
+    fn emacs_enter_keeps_existing_no_clear_copy_binding() {
+        assert_eq!(
+            attached_copy_mode_input_action(ModeKeys::Emacs, &PromptInputEvent::Enter),
+            AttachedCopyModeInputAction::Command("copy-selection-no-clear")
         );
     }
 }

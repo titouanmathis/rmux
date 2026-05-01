@@ -501,6 +501,9 @@ mod copy_mode_motion;
 #[path = "handler_attach_tests/copy_mode_search.rs"]
 mod copy_mode_search;
 
+#[path = "handler_attach_tests/copy_mode_selection_yank.rs"]
+mod copy_mode_selection_yank;
+
 #[path = "handler_attach_tests/mode_tree_clock.rs"]
 mod mode_tree_clock;
 

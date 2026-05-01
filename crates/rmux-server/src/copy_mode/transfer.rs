@@ -11,7 +11,7 @@ use super::args::{
 use super::text::{normalize_positions, owner_positions};
 use super::types::{
     ClearPolicy, CopyBufferTarget, CopyModeCommandOutcome, CopyModeTransfer, CopyPosition,
-    SelectionMode,
+    ModeKeys, SelectionMode,
 };
 use super::CopyModeState;
 
@@ -277,7 +277,10 @@ impl CopyModeState {
         let selection = self.selection_snapshot()?;
         let (start, end) = normalize_positions(selection.anchor, selection.end);
         if selection.mode == SelectionMode::Char && !self.rectangle {
-            return Some(self.extract_char_selection_exclusive(start, end));
+            return Some(match self.mode_keys {
+                ModeKeys::Vi => self.extract_char_selection_inclusive(start, end),
+                ModeKeys::Emacs => self.extract_char_selection_exclusive(start, end),
+            });
         }
         let mut lines = Vec::new();
         let rect_min_x = start.x.min(end.x);
@@ -324,6 +327,30 @@ impl CopyModeState {
             }) else {
                 lines.push(String::new());
                 continue;
+            };
+            if range_end < range_start {
+                lines.push(String::new());
+                continue;
+            }
+            lines.push(self.extract_line_range(
+                &line,
+                range_start,
+                range_end,
+                y != start.y || y != end.y,
+            ));
+        }
+        lines.join("\n")
+    }
+
+    fn extract_char_selection_inclusive(&self, start: CopyPosition, end: CopyPosition) -> String {
+        let mut lines = Vec::new();
+        for y in start.y..=end.y {
+            let line = self.line(y);
+            let range_start = if y == start.y { start.x } else { 0 };
+            let range_end = if y == end.y {
+                end.x
+            } else {
+                self.line_end_x(y)
             };
             if range_end < range_start {
                 lines.push(String::new());

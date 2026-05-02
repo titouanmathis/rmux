@@ -148,6 +148,14 @@ async fn create_quiet_attached_session(
 }
 
 async fn create_quiet_session(handler: &RequestHandler, session: &SessionName) {
+    create_session_with_command(handler, session, quiet_attached_command()).await;
+}
+
+async fn create_session_with_command(
+    handler: &RequestHandler,
+    session: &SessionName,
+    command: Vec<String>,
+) {
     let response = handler
         .handle(Request::NewSessionExt(NewSessionExtRequest {
             session_name: Some(session.clone()),
@@ -163,13 +171,38 @@ async fn create_quiet_session(handler: &RequestHandler, session: &SessionName) {
             window_name: None,
             print_session_info: false,
             print_format: None,
-            command: Some(quiet_attached_command()),
+            command: Some(command),
         }))
         .await;
     assert!(
         matches!(response, Response::NewSession(_)),
         "quiet test session should be created, got {response:?}"
     );
+}
+
+#[cfg(windows)]
+fn quiet_ready_command(marker: &str) -> Vec<String> {
+    let system_root =
+        std::env::var_os("SystemRoot").unwrap_or_else(|| std::ffi::OsString::from(r"C:\Windows"));
+    let cmd = std::path::PathBuf::from(system_root)
+        .join("System32")
+        .join("cmd.exe");
+    vec![
+        cmd.to_string_lossy().into_owned(),
+        "/d".to_owned(),
+        "/q".to_owned(),
+        "/c".to_owned(),
+        format!("echo {marker} & ping -n 120 127.0.0.1 >NUL"),
+    ]
+}
+
+#[cfg(unix)]
+fn quiet_ready_command(marker: &str) -> Vec<String> {
+    vec![
+        "/bin/sh".to_owned(),
+        "-c".to_owned(),
+        format!("printf '{marker}\\n'; sleep 60"),
+    ]
 }
 
 #[cfg(windows)]

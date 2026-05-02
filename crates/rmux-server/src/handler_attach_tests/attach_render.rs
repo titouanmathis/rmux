@@ -217,19 +217,35 @@ async fn attach_session_render_frame_positions_cursor_at_active_pane_cursor() {
 async fn attach_session_replays_all_visible_pane_screens() {
     let handler = RequestHandler::new();
     let alpha = session_name("alpha");
+    let top_ready = "RMUX_ATTACH_REPLAY_TOP_READY";
+    let bottom_ready = "RMUX_ATTACH_REPLAY_BOTTOM_READY";
 
-    create_quiet_session(&handler, &alpha).await;
+    create_session_with_command(&handler, &alpha, quiet_ready_command(top_ready)).await;
     assert!(matches!(
         handler
             .handle(Request::SplitWindowExt(SplitWindowExtRequest {
                 target: SplitWindowTarget::Session(alpha.clone()),
                 direction: rmux_proto::SplitDirection::Vertical,
                 environment: None,
-                command: Some(quiet_attached_command()),
+                command: Some(quiet_ready_command(bottom_ready)),
             }))
             .await,
         Response::SplitWindow(_)
     ));
+    wait_for_capture_containing(
+        &handler,
+        PaneTarget::with_window(alpha.clone(), 0, 0),
+        top_ready,
+        "top pane quiet command should be settled before transcript replacement",
+    )
+    .await;
+    wait_for_capture_containing(
+        &handler,
+        PaneTarget::with_window(alpha.clone(), 0, 1),
+        bottom_ready,
+        "bottom pane quiet command should be settled before transcript replacement",
+    )
+    .await;
 
     replace_transcript_contents(
         &handler,

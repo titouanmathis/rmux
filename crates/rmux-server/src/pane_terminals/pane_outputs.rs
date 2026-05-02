@@ -188,6 +188,17 @@ impl HandlerState {
             .ok_or_else(|| missing_pane_terminal(session_name, window_index, pane_index))
     }
 
+    pub(crate) fn subscribe_runtime_pane_output(
+        &self,
+        runtime_session_name: &SessionName,
+        pane_id: PaneId,
+    ) -> Option<tokio::sync::broadcast::Receiver<Vec<u8>>> {
+        self.pane_outputs
+            .get(runtime_session_name)
+            .and_then(|panes| panes.get(&pane_id))
+            .map(PaneOutputSender::subscribe)
+    }
+
     pub(crate) fn session_pane_outputs(
         &self,
         session_name: &SessionName,

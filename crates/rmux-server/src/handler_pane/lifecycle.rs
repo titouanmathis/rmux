@@ -10,15 +10,18 @@ use crate::format_runtime::render_runtime_template;
 use crate::pane_io::{PaneExitCallback, PaneExitEvent};
 use crate::pane_terminal_lookup::missing_pane_terminal;
 use crate::pane_terminals::{session_not_found, HandlerState, PaneExitMetadata};
+use tokio::sync::broadcast;
 use tracing::warn;
 
 const PANE_EXIT_STATUS_RETRY_DELAY: Duration = Duration::from_millis(10);
 const PANE_EXIT_STATUS_RETRY_ATTEMPTS: usize = 20;
+const DEAD_PANE_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
 
 enum PaneExitPlan {
     Ignore,
     KeepDead {
         target: PaneTarget,
+        prepare_dead: bool,
     },
     RemovePane {
         session_name: rmux_proto::SessionName,
@@ -81,47 +84,10 @@ impl RequestHandler {
 
                 if let Some(metadata) = metadata {
                     if should_keep_dead_pane(&state, &target, metadata) {
-                        if !was_dead {
-                            let cleared_respawned_transcript = match state
-                                .clear_runtime_pane_transcript_for_dead_exit_if_marked(
-                                    &event.session_name,
-                                    event.pane_id,
-                                ) {
-                                Ok(cleared) => cleared,
-                                Err(error) => {
-                                    warn!(
-                                        session = %event.session_name,
-                                        pane_id = event.pane_id.as_u32(),
-                                        "failed to prepare dead pane transcript: {error}"
-                                    );
-                                    false
-                                }
-                            };
-                            if !cleared_respawned_transcript {
-                                if let Err(error) = state.strip_attached_submitted_line(
-                                    &event.session_name,
-                                    event.pane_id,
-                                ) {
-                                    warn!(
-                                        session = %event.session_name,
-                                        pane_id = event.pane_id.as_u32(),
-                                        "failed to strip attached submitted line for dead pane: {error}"
-                                    );
-                                }
-                            }
-                            if let Err(error) = append_remain_on_exit_message(
-                                &mut state,
-                                &event.session_name,
-                                &target,
-                            ) {
-                                warn!(
-                                    session = %event.session_name,
-                                    pane_id = event.pane_id.as_u32(),
-                                    "failed to append remain-on-exit message: {error}"
-                                );
-                            }
-                        }
-                        Some(PaneExitPlan::KeepDead { target })
+                        Some(PaneExitPlan::KeepDead {
+                            target,
+                            prepare_dead: !was_dead,
+                        })
                     } else {
                         let Some(session) = state.sessions.session(target.session_name()) else {
                             return;
@@ -239,7 +205,14 @@ impl RequestHandler {
 
         match plan {
             PaneExitPlan::Ignore => {}
-            PaneExitPlan::KeepDead { target } => {
+            PaneExitPlan::KeepDead {
+                target,
+                prepare_dead,
+            } => {
+                if prepare_dead {
+                    self.prepare_kept_dead_pane_transcript(&event, &target)
+                        .await;
+                }
                 let session_names = if self.attached_count(target.session_name()).await == 0 {
                     let mut state = self.state.lock().await;
                     match apply_dead_pane_automatic_window_name(&mut state, &target) {
@@ -295,6 +268,89 @@ impl RequestHandler {
             }
         }
     }
+
+    async fn prepare_kept_dead_pane_transcript(&self, event: &PaneExitEvent, target: &PaneTarget) {
+        let (retry_strip, output_rx) = {
+            let mut state = self.state.lock().await;
+            let cleared_respawned_transcript = match state
+                .clear_runtime_pane_transcript_for_dead_exit_if_marked(
+                    &event.session_name,
+                    event.pane_id,
+                ) {
+                Ok(cleared) => cleared,
+                Err(error) => {
+                    warn!(
+                        session = %event.session_name,
+                        pane_id = event.pane_id.as_u32(),
+                        "failed to prepare dead pane transcript: {error}"
+                    );
+                    false
+                }
+            };
+            let output_rx = (!cleared_respawned_transcript)
+                .then(|| state.subscribe_runtime_pane_output(&event.session_name, event.pane_id))
+                .flatten();
+            let stripped = if cleared_respawned_transcript {
+                false
+            } else {
+                match state.strip_attached_submitted_line(&event.session_name, event.pane_id) {
+                    Ok(stripped) => stripped,
+                    Err(error) => {
+                        warn!(
+                            session = %event.session_name,
+                            pane_id = event.pane_id.as_u32(),
+                            "failed to strip attached submitted line for dead pane: {error}"
+                        );
+                        false
+                    }
+                }
+            };
+            (!cleared_respawned_transcript && !stripped, output_rx)
+        };
+
+        if retry_strip {
+            // On Windows the child-exit watcher can beat the ConPTY reader.
+            // Wait for the reader's EOF marker so a final echoed command can be
+            // stripped before the dead-pane message is appended.
+            wait_for_pane_output_eof(output_rx).await;
+        }
+
+        let mut state = self.state.lock().await;
+        if retry_strip {
+            if let Err(error) =
+                state.strip_attached_submitted_line(&event.session_name, event.pane_id)
+            {
+                warn!(
+                    session = %event.session_name,
+                    pane_id = event.pane_id.as_u32(),
+                    "failed to retry attached submitted line strip for dead pane: {error}"
+                );
+            }
+        }
+        if let Err(error) = append_remain_on_exit_message(&mut state, &event.session_name, target) {
+            warn!(
+                session = %event.session_name,
+                pane_id = event.pane_id.as_u32(),
+                "failed to append remain-on-exit message: {error}"
+            );
+        }
+    }
+}
+
+async fn wait_for_pane_output_eof(output_rx: Option<broadcast::Receiver<Vec<u8>>>) {
+    let Some(mut output_rx) = output_rx else {
+        return;
+    };
+    let _ = tokio::time::timeout(DEAD_PANE_OUTPUT_DRAIN_TIMEOUT, async move {
+        loop {
+            match output_rx.recv().await {
+                Ok(bytes) if bytes.is_empty() => break,
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    })
+    .await;
 }
 
 fn should_keep_dead_pane(

@@ -398,6 +398,26 @@ pub(crate) struct FormattedLine {
     pub(crate) ranges: Vec<StatusRange>,
 }
 
+impl FormattedLine {
+    pub(crate) fn width(&self) -> usize {
+        self.width
+    }
+
+    pub(crate) fn trim_leading_ascii_space(mut self) -> Self {
+        let Some(CanvasSlot::Lead(cell)) = self.canvas.slots.first() else {
+            return self;
+        };
+        if cell.text != " " || cell.width != 1 {
+            return self;
+        }
+
+        self.canvas.slots.remove(0);
+        self.width = self.width.saturating_sub(1);
+        self.ranges = self.canvas.ranges();
+        self
+    }
+}
+
 pub(crate) fn format_draw_line(
     expanded: &str,
     base: &Style,

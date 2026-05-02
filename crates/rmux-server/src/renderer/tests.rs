@@ -1,6 +1,7 @@
 use super::{
     border_cells, parse_standalone_style, render, status_bar_runs, style_sgr_bytes, BorderStyle,
 };
+use crate::copy_mode::CopyModeSummary;
 use rmux_core::{input::InputParser, OptionStore, Screen, Session, Style, Utf8Config};
 use rmux_proto::{
     OptionName, ResizePaneAdjustment, ScopeSelector, SessionName, SetOptionMode, SplitDirection,
@@ -29,6 +30,31 @@ fn screen_with(bytes: &[u8], size: TerminalSize) -> Screen {
     screen
 }
 
+fn copy_mode_summary_with_time(top_line_time: i64) -> CopyModeSummary {
+    CopyModeSummary {
+        view_mode: false,
+        scroll_position: 0,
+        rectangle_toggle: false,
+        cursor_x: 0,
+        cursor_y: 0,
+        selection_start: None,
+        selection_end: None,
+        selection_active: false,
+        selection_present: false,
+        selection_mode: None,
+        search_present: false,
+        search_timed_out: false,
+        search_count: 0,
+        search_count_partial: false,
+        search_match: None,
+        copy_cursor_word: String::new(),
+        copy_cursor_line: String::new(),
+        copy_cursor_hyperlink: String::new(),
+        pane_search_string: String::new(),
+        top_line_time,
+    }
+}
+
 #[test]
 fn rendered_pane_line_truncates_to_pane_width_without_counting_sgr() {
     let utf8 = Utf8Config::default();
@@ -48,6 +74,54 @@ fn rendered_pane_line_truncates_to_pane_width_without_counting_sgr() {
     ))
     .expect("utf8");
     assert_eq!(clipped_wide, "表a");
+}
+
+#[test]
+fn copy_mode_position_truncation_does_not_style_separator_before_bracket() {
+    let session = Session::new(session_name("alpha"), TerminalSize { cols: 6, rows: 4 });
+    let pane = session.window().pane(0).expect("pane 0 exists");
+    let frame = String::from_utf8(super::render_copy_mode_position(
+        &session,
+        &OptionStore::new(),
+        0,
+        pane,
+        &copy_mode_summary_with_time(1),
+        1,
+    ))
+    .expect("copy-mode position frame is utf-8");
+
+    assert!(
+        frame.contains("\u{1b}[0;30;43m[0/1]") || frame.contains("\u{1b}[30;43m[0/1]"),
+        "copy-mode badge should start styling at '[': {frame:?}"
+    );
+    assert!(
+        !frame.contains("\u{1b}[0;30;43m [0/1]") && !frame.contains("\u{1b}[30;43m [0/1]"),
+        "copy-mode badge must not paint the truncated separator space: {frame:?}"
+    );
+}
+
+#[test]
+fn copy_mode_position_without_time_does_not_style_separator_before_bracket() {
+    let session = Session::new(session_name("alpha"), TerminalSize { cols: 100, rows: 4 });
+    let pane = session.window().pane(0).expect("pane 0 exists");
+    let frame = String::from_utf8(super::render_copy_mode_position(
+        &session,
+        &OptionStore::new(),
+        0,
+        pane,
+        &copy_mode_summary_with_time(0),
+        1,
+    ))
+    .expect("copy-mode position frame is utf-8");
+
+    assert!(
+        frame.contains("\u{1b}[0;30;43m[0/1]") || frame.contains("\u{1b}[30;43m[0/1]"),
+        "copy-mode badge should start styling at '[': {frame:?}"
+    );
+    assert!(
+        !frame.contains("\u{1b}[0;30;43m [0/1]") && !frame.contains("\u{1b}[30;43m [0/1]"),
+        "copy-mode badge must not paint a leading separator when no time is shown: {frame:?}"
+    );
 }
 
 fn has_cell(cells: &[super::BorderCell], x: u16, y: u16, glyph: char) -> bool {

@@ -319,18 +319,19 @@ pub(crate) fn render_copy_mode_position(
         render_runtime_template(template, &runtime, true)
     );
     let utf8 = Utf8Config::from_options(options);
-    let width = format_draw_content_width(&expanded, &Style::default(), &utf8)
-        .min(usize::from(pane_geometry.cols()));
+    let content_width = format_draw_content_width(&expanded, &Style::default(), &utf8);
+    let width = content_width.min(usize::from(pane_geometry.cols()));
     if width == 0 {
         return Vec::new();
     }
-    let line = format_draw_line(&expanded, &Style::default(), width, &utf8);
+    let line =
+        format_draw_line(&expanded, &Style::default(), width, &utf8).trim_leading_ascii_space();
     let mut frame = Vec::new();
     render_formatted_line(
         &mut frame,
         pane_geometry
             .x()
-            .saturating_add(pane_geometry.cols().saturating_sub(width as u16)),
+            .saturating_add(pane_geometry.cols().saturating_sub(line.width() as u16)),
         pane_geometry.y().saturating_add(geometry.content_y_offset),
         &line,
     );

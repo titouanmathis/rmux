@@ -49,6 +49,24 @@ fn fill_background_covers_trailing_space() {
 }
 
 #[test]
+fn leading_space_trim_removes_styled_separator_cell() {
+    let line = format_draw_line(
+        "#[align=right bg=yellow,fg=black]12:34 [0/1]",
+        &Style::default(),
+        6,
+        &Utf8Config::default(),
+    )
+    .trim_leading_ascii_space();
+    let mut frame = Vec::new();
+    render_formatted_line(&mut frame, 0, 0, &line);
+    let frame = String::from_utf8(frame).expect("frame is utf-8");
+
+    assert_eq!(line.width(), 5);
+    assert!(frame.contains("\u{1b}[0;30;43m[0/1]"), "{frame:?}");
+    assert!(!frame.contains("\u{1b}[0;30;43m [0/1]"), "{frame:?}");
+}
+
+#[test]
 fn range_directives_split_click_targets_inside_one_surface() {
     let line = format_draw_line(
         "#[range=left]a#[range=window|9]b#[norange]c",

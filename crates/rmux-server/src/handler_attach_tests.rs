@@ -172,18 +172,17 @@ async fn create_quiet_attached_session(
 fn quiet_attached_command() -> Vec<String> {
     let system_root =
         std::env::var_os("SystemRoot").unwrap_or_else(|| std::ffi::OsString::from(r"C:\Windows"));
-    let powershell = std::path::PathBuf::from(system_root)
+    // Keep the PTY alive without PowerShell startup control frames racing
+    // synthetic transcript seeds in attach/copy-mode tests.
+    let cmd = std::path::PathBuf::from(system_root)
         .join("System32")
-        .join("WindowsPowerShell")
-        .join("v1.0")
-        .join("powershell.exe");
+        .join("cmd.exe");
     vec![
-        powershell.to_string_lossy().into_owned(),
-        "-NoLogo".to_owned(),
-        "-NoProfile".to_owned(),
-        "-NonInteractive".to_owned(),
-        "-Command".to_owned(),
-        "Start-Sleep -Seconds 60".to_owned(),
+        cmd.to_string_lossy().into_owned(),
+        "/d".to_owned(),
+        "/q".to_owned(),
+        "/c".to_owned(),
+        "ping -n 120 127.0.0.1 >NUL".to_owned(),
     ]
 }
 

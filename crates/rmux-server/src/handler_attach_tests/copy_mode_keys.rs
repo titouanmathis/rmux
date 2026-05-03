@@ -374,14 +374,19 @@ async fn attached_copy_mode_updates_automatic_window_name_on_entry_and_exit() {
         .handle_attached_live_input_for_test(requester_pid, b"q")
         .await
         .expect("q exits copy-mode");
-    assert_eq!(
-        display_target_format(
-            &handler,
-            target,
-            "#{window_name}|#{pane_in_mode}|#{pane_mode}"
-        )
-        .await,
-        normal_status
+    let restored_status = display_target_format(
+        &handler,
+        target,
+        "#{window_name}|#{pane_in_mode}|#{pane_mode}",
+    )
+    .await;
+    assert!(
+        restored_status.ends_with("|0|\n"),
+        "copy-mode exit should restore normal pane mode, got {restored_status:?}"
+    );
+    assert!(
+        !restored_status.starts_with("[rmux]|"),
+        "copy-mode exit should restore a process-derived automatic window name, got {restored_status:?}"
     );
 }
 

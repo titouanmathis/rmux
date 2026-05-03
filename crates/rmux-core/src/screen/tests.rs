@@ -103,6 +103,20 @@ fn writing_at_line_start_breaks_previous_wrapped_line_before_reflow() {
 }
 
 #[test]
+fn height_growth_keeps_cursor_on_content_when_history_is_pulled_into_view() {
+    let mut screen = new_screen(20, 3, 10);
+    parse(&mut screen, b"h0\r\nh1\r\np$ echo A0\r\nA0\r\np$ ");
+
+    screen.resize(TerminalSize { cols: 20, rows: 5 });
+    parse(&mut screen, b"\rp$ ");
+
+    let capture = screen.capture_transcript(full_range(), GridRenderOptions::default());
+    let rendered = String::from_utf8(capture).expect("capture must be UTF-8");
+    let lines = rendered.lines().collect::<Vec<_>>();
+    assert_eq!(&lines[..5], &["h0", "h1", "p$ echo A0", "A0", "p$"]);
+}
+
+#[test]
 fn scrollback_lines_are_captured_after_crlf_output() {
     let mut screen = new_screen(8, 2, 10);
     parse(&mut screen, b"one\r\ntwo\r\nthree\r\n");

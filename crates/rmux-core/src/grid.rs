@@ -383,6 +383,7 @@ impl Grid {
                 for line in restored.into_iter().rev() {
                     self.visible.insert(0, line);
                 }
+                *cursor_y = cursor_y.saturating_add(pull).min(sy.saturating_sub(1));
                 self.hscrolled -= pull as usize;
                 needed -= pull;
             }

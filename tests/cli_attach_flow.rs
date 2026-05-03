@@ -1656,6 +1656,10 @@ fn choose_tree_q_after_resize_restores_the_resized_four_pane_layout() -> Result<
     let mut pending_after_q =
         wait_for_mode_tree_exit_collecting_output(&harness, &mut alpha, &alpha_active_pane)?;
     let alpha_marker_refs = alpha_markers.iter().map(String::as_str).collect::<Vec<_>>();
+    let alpha_command_refs = alpha_indexes
+        .iter()
+        .map(|pane_index| format!("p$ echo A{pane_index}"))
+        .collect::<Vec<_>>();
     let deadline = std::time::Instant::now() + IO_TIMEOUT;
     let alpha_restored = loop {
         pending_after_q.extend(drain_attach_output_bytes(alpha.master_mut())?);
@@ -1670,6 +1674,9 @@ fn choose_tree_q_after_resize_restores_the_resized_four_pane_layout() -> Result<
         if alpha_marker_refs
             .iter()
             .all(|marker| panes.contains(marker))
+            && alpha_command_refs
+                .iter()
+                .all(|command| panes.contains(command))
             && !panes.contains("sort: index")
         {
             break transcript;
@@ -1737,6 +1744,10 @@ fn choose_tree_q_after_resize_restores_the_resized_four_pane_layout() -> Result<
     beta_screen.resize(resized_screen_size);
     std::thread::sleep(Duration::from_millis(1000));
     let beta_marker_refs = beta_markers.iter().map(String::as_str).collect::<Vec<_>>();
+    let beta_command_refs = beta_indexes
+        .iter()
+        .map(|pane_index| format!("p$ echo A{pane_index}"))
+        .collect::<Vec<_>>();
     let deadline = std::time::Instant::now() + IO_TIMEOUT;
     let beta_expected = loop {
         let beta_resize_bytes = drain_attach_output_bytes(beta.master_mut())?;
@@ -1744,7 +1755,12 @@ fn choose_tree_q_after_resize_restores_the_resized_four_pane_layout() -> Result<
             let transcript =
                 capture_attach_transcript(&mut beta_screen, &mut beta_parser, &beta_resize_bytes)?;
             let panes = transcript_without_status_line(&transcript);
-            if beta_marker_refs.iter().all(|marker| panes.contains(marker)) {
+            if beta_marker_refs.iter().all(|marker| panes.contains(marker))
+                && beta_command_refs
+                    .iter()
+                    .all(|command| panes.contains(command))
+                && !panes.contains("[beta]")
+            {
                 break transcript;
             }
         }

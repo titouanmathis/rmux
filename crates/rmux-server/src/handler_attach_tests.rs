@@ -32,11 +32,7 @@ fn session_name(value: &str) -> SessionName {
 
 #[cfg(unix)]
 fn default_shell_window_name() -> String {
-    std::env::var_os("SHELL")
-        .and_then(|shell| Path::new(&shell).file_name().map(|name| name.to_owned()))
-        .map(|name| name.to_string_lossy().trim_start_matches('-').to_owned())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "sh".to_owned())
+    "bash".to_owned()
 }
 
 #[cfg(windows)]

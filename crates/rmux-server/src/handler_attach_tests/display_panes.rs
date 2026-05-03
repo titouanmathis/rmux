@@ -170,7 +170,7 @@ async fn display_panes_bounds_unterminated_sgr_mouse_without_pane_leak() {
     let handler = RequestHandler::new();
     let requester_pid = std::process::id();
     let alpha = session_name("alpha");
-    let mut control_rx = create_attached_session(&handler, requester_pid, &alpha).await;
+    let mut control_rx = create_quiet_attached_session(&handler, requester_pid, &alpha).await;
     let target = PaneTarget::new(alpha.clone(), 0);
     drain_attach_controls(&mut control_rx);
     let before_capture = capture_pane_print(&handler, target.clone()).await;

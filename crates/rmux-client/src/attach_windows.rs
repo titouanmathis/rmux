@@ -325,13 +325,16 @@ fn join_attach_thread(
 
 #[cfg(test)]
 mod tests {
-    use std::io;
+    use std::fs::File;
+    use std::io::{self, Write};
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use std::sync::Arc;
 
+    use tokio::sync::mpsc;
     use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::System::Pipes::CreatePipe;
 
-    use super::{input_join_policy, InputJoinPolicy};
+    use super::{input_join_policy, input_loop, AttachLockState, InputJoinPolicy};
 
     #[test]
     fn pipe_stdin_handles_are_detached_on_attach_close() {
@@ -356,5 +359,45 @@ mod tests {
             input_join_policy(read.as_raw_handle()),
             InputJoinPolicy::DetachOnClose
         );
+    }
+
+    #[test]
+    fn pipe_stdin_input_loop_preserves_paste_bytes() -> Result<(), Box<dyn std::error::Error>> {
+        let mut read: HANDLE = std::ptr::null_mut();
+        let mut write: HANDLE = std::ptr::null_mut();
+        let ok = unsafe {
+            // SAFETY: read/write point to writable HANDLE slots and the default
+            // security descriptor is acceptable for this local test pipe.
+            CreatePipe(&mut read, &mut write, std::ptr::null_mut(), 0)
+        };
+        assert_ne!(ok, 0, "CreatePipe failed: {}", io::Error::last_os_error());
+        let reader = unsafe {
+            // SAFETY: read is owned by this test after a successful CreatePipe call.
+            File::from_raw_handle(read)
+        };
+        let mut writer = unsafe {
+            // SAFETY: write is owned by this test after a successful CreatePipe call.
+            File::from_raw_handle(write)
+        };
+        let (input_tx, mut input_rx) = mpsc::channel(1);
+        let lock_state = Arc::new(AttachLockState::default());
+        let input_lock_state = Arc::clone(&lock_state);
+        let input_thread =
+            std::thread::spawn(move || input_loop(reader, input_tx, input_lock_state));
+        let payload = b"\x1b[200~ascii\r\n\x02\x1b[<64;2;2M\x1b[9;2u\x1b[200~\xe6\x9d\xb1\xe4\xba\xac cafe\xcc\x81\x1b[201~";
+
+        writer.write_all(payload)?;
+        writer.flush()?;
+        drop(writer);
+
+        assert_eq!(
+            input_rx.blocking_recv().as_deref(),
+            Some(payload.as_slice())
+        );
+        lock_state.close();
+        input_thread
+            .join()
+            .map_err(|_| "attach input thread panicked")??;
+        Ok(())
     }
 }

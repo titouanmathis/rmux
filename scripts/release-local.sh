@@ -41,6 +41,9 @@ display_path() {
   local path full
   path="$1"
   case "$path" in
+    "<repo>"/*) printf '%s\n' "${path#"<repo>/"}"; return 0 ;;
+  esac
+  case "$path" in
     /*) full="$path" ;;
     *) full="$repo_root/$path" ;;
   esac
@@ -89,6 +92,15 @@ kv_value() {
   key="$1"
   file="$2"
   sed -n "s/^$key=//p" "$file" | tail -n 1
+}
+
+resolve_logged_path() {
+  local path
+  path="$1"
+  case "$path" in
+    "<repo>"/*) printf '%s\n' "$repo_root/${path#"<repo>/"}" ;;
+    *) printf '%s\n' "$path" ;;
+  esac
 }
 
 detect_platform() {
@@ -164,7 +176,7 @@ run_logged "$package_log" \
   --configuration "$configuration" \
   --output-dir "$dist_dir"
 
-package_path="$(kv_value package "$package_log")"
+package_path="$(resolve_logged_path "$(kv_value package "$package_log")")"
 package_sha="$(kv_value sha256 "$package_log")"
 [ -n "$package_path" ] || die "package script did not emit package=<path>"
 [ -n "$package_sha" ] || die "package script did not emit sha256=<hash>"
@@ -183,8 +195,8 @@ case "$platform" in
       "$repo_root/scripts/sign-macos.sh" \
       --package "$package_path" \
       --dry-run
-    signing_reference="$(kv_value reference "$signing_log")"
-    signing_manifest="$(kv_value manifest "$signing_log")"
+    signing_reference="$(resolve_logged_path "$(kv_value reference "$signing_log")")"
+    signing_manifest="$(resolve_logged_path "$(kv_value manifest "$signing_log")")"
     signing_verdict="$(kv_value verdict "$signing_log")"
     ;;
   linux)

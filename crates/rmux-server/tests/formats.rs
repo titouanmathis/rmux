@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use std::{error::Error, path::Path};
+use std::error::Error;
 mod common;
 
 use common::{send_request, session_name, start_server, TestHarness};
@@ -10,11 +10,7 @@ use rmux_proto::{
 };
 
 fn default_shell_window_name() -> String {
-    std::env::var_os("SHELL")
-        .and_then(|shell| Path::new(&shell).file_name().map(|name| name.to_owned()))
-        .map(|name| name.to_string_lossy().trim_start_matches('-').to_owned())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "sh".to_owned())
+    "bash".to_owned()
 }
 
 fn assert_window_format_line(

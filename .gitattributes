@@ -1,4 +1,5 @@
 * text=auto eol=lf
 
 # PTY transcript bytes are reference payload, not source text.
-target/release-reference/artifacts/macos-rc-issue-fix-4fd583e900ca/logs/smoke_unix.log -text
+target/release-reference/artifacts/**/logs/smoke-unix.log -text -diff
+target/release-reference/artifacts/macos-rc-issue-fix-4fd583e900ca/logs/smoke_unix.log -text -diff

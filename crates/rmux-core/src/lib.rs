@@ -45,7 +45,7 @@ pub use hooks::{
     validate_hook_registration, validate_hook_scope, HookBindingView, HookDispatch, HookGlobalRoot,
     HookSetOptions, HookStore,
 };
-pub use identity::{SessionId, WindowId};
+pub use identity::{PaneId, SessionId, SessionName, WindowId};
 pub use input::{
     colour_join_rgb, Colour, GridAttr, COLOUR_DEFAULT, COLOUR_FLAG_256, COLOUR_FLAG_RGB,
     COLOUR_NONE, COLOUR_TERMINAL,
@@ -65,7 +65,7 @@ pub use options::{
     validate_option_mutation, validate_option_name_mutation, OptionMutationOutcome,
     OptionNotification, OptionStore, ShowOptionsMode,
 };
-pub use pane::{Pane, PaneGeometry, PaneId};
+pub use pane::{Pane, PaneGeometry};
 pub use screen::{Screen, ScreenCellView, ScreenLineView};
 pub use session::{
     BreakPaneOptions, KillPaneOutcome, PaneJoinOptions, PaneSwapOptions, Session,

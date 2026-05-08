@@ -62,5 +62,10 @@ mod tests {
             std::any::TypeId::of::<crate::SessionId>(),
             "core re-exports must resolve to rmux_proto::SessionId",
         );
+        assert_eq!(
+            std::any::TypeId::of::<rmux_proto::SessionName>(),
+            std::any::TypeId::of::<crate::SessionName>(),
+            "core re-exports must resolve to rmux_proto::SessionName",
+        );
     }
 }

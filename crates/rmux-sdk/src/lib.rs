@@ -17,12 +17,17 @@
 
 pub mod command;
 pub mod error;
+pub mod events;
 pub mod snapshot;
 pub mod spec;
 pub mod types;
 
 pub use command::{RmuxCommand, RmuxCommandKind};
 pub use error::{Result, RmuxError};
+pub use events::{
+    PaneCommandStatus, PaneCommandSummary, PaneDisconnectReason, PaneEvent, PaneExitReason,
+    PaneNotification, PanePermissionScope,
+};
 pub use snapshot::{
     PaneAttributes, PaneCell, PaneColor, PaneCursor, PaneGlyph, PaneSnapshot,
     PaneSnapshotShapeError,

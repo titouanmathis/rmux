@@ -17,11 +17,16 @@
 
 pub mod command;
 pub mod error;
+pub mod snapshot;
 pub mod spec;
 pub mod types;
 
 pub use command::{RmuxCommand, RmuxCommandKind};
 pub use error::{Result, RmuxError};
+pub use snapshot::{
+    PaneAttributes, PaneCell, PaneColor, PaneCursor, PaneGlyph, PaneSnapshot,
+    PaneSnapshotShapeError,
+};
 pub use spec::{
     AttachSessionReuse, AttachSessionSpec, ClientTerminalSpec, NewSessionReuse, NewSessionSpec,
     ProcessSpec, RefreshClientSpec, SplitDirectionSpec, SplitSpec, SplitTargetSpec,

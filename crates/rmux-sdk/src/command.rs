@@ -156,3 +156,39 @@ impl From<RmuxCommandKind> for RmuxCommand {
         Self::new(value)
     }
 }
+
+impl From<rmux_proto::Request> for RmuxCommand {
+    fn from(value: rmux_proto::Request) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<NewSessionSpec> for RmuxCommand {
+    fn from(value: NewSessionSpec) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<AttachSessionSpec> for RmuxCommand {
+    fn from(value: AttachSessionSpec) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<SplitSpec> for RmuxCommand {
+    fn from(value: SplitSpec) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<RefreshClientSpec> for RmuxCommand {
+    fn from(value: RefreshClientSpec) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<RmuxCommand> for rmux_proto::Request {
+    fn from(value: RmuxCommand) -> Self {
+        value.into_request()
+    }
+}

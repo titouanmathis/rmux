@@ -4,9 +4,8 @@
 //! Public daemon-backed RMUX SDK scaffolding.
 //!
 //! v1 introduces a fully daemon-backed public SDK. This crate currently
-//! exposes only the compile-time vocabulary and facade-error skeletons
-//! needed by later steps; daemon transport, handle types, and event
-//! plumbing land in subsequent commits.
+//! exposes the compile-time vocabulary, inert facade handles, and facade-error
+//! skeletons that pin the public SDK boundary.
 //!
 //! `rmux-sdk` is a public integration peer of `rmux-client` and must not
 //! depend on `rmux-client`, `rmux-core`, `rmux-server`, or `rmux-pty` as
@@ -18,6 +17,7 @@
 pub mod command;
 pub mod error;
 pub mod events;
+pub mod handles;
 pub mod info;
 pub mod input;
 pub mod snapshot;
@@ -30,6 +30,7 @@ pub use events::{
     PaneCommandStatus, PaneCommandSummary, PaneDisconnectReason, PaneEvent, PaneExitReason,
     PaneNotification, PanePermissionScope,
 };
+pub use handles::{Rmux, RmuxBuilder};
 pub use info::{InfoSnapshot, PaneExitState, PaneInfo, PaneProcessState, SessionInfo, WindowInfo};
 pub use input::{
     DetachChord, DetachDetector, DetachOutcome, KeyCode, KeyConversionError, KeyEvent, KeyModifiers,

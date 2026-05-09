@@ -16,7 +16,7 @@ use std::error::Error as StdError;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
-use rmux_sdk::{Result, RmuxEndpoint, RmuxError, SessionName};
+use rmux_sdk::{Result, Rmux, RmuxBuilder, RmuxEndpoint, RmuxError, SessionName};
 
 fn assert_send<T: Send>() {}
 fn assert_sync<T: Sync>() {}
@@ -27,6 +27,11 @@ fn assert_clone<T: Clone>() {}
 fn assert_eq_hash<T: Eq + Hash>() {}
 fn assert_debug<T: std::fmt::Debug>() {}
 
+fn assert_builder_records_endpoint(builder: RmuxBuilder, expected: &RmuxEndpoint) {
+    assert_eq!(builder.configured_endpoint(), expected);
+    assert_eq!(builder.build().endpoint(), expected);
+}
+
 /// Compile-only gate for the SDK's static bounds and expected derives.
 ///
 /// This function is never invoked; its purpose is to fail compilation if
@@ -34,6 +39,18 @@ fn assert_debug<T: std::fmt::Debug>() {}
 /// test target. The runtime tests below repeat the important bounds with
 /// targeted failure names.
 fn _assert_bounds() {
+    assert_send::<Rmux>();
+    assert_sync::<Rmux>();
+    assert_static::<Rmux>();
+    assert_default::<Rmux>();
+    assert_debug::<Rmux>();
+
+    assert_send::<RmuxBuilder>();
+    assert_sync::<RmuxBuilder>();
+    assert_static::<RmuxBuilder>();
+    assert_default::<RmuxBuilder>();
+    assert_debug::<RmuxBuilder>();
+
     assert_send::<RmuxEndpoint>();
     assert_sync::<RmuxEndpoint>();
     assert_static::<RmuxEndpoint>();
@@ -55,6 +72,24 @@ fn _assert_bounds() {
     assert_send::<Result<RmuxEndpoint>>();
     assert_sync::<Result<RmuxEndpoint>>();
     assert_static::<Result<RmuxEndpoint>>();
+
+    assert_send::<Result<Rmux>>();
+    assert_sync::<Result<Rmux>>();
+    assert_static::<Result<Rmux>>();
+}
+
+#[test]
+fn rmux_facade_is_send_sync_static() {
+    assert_send::<Rmux>();
+    assert_sync::<Rmux>();
+    assert_static::<Rmux>();
+}
+
+#[test]
+fn rmux_builder_is_send_sync_static() {
+    assert_send::<RmuxBuilder>();
+    assert_sync::<RmuxBuilder>();
+    assert_static::<RmuxBuilder>();
 }
 
 #[test]
@@ -85,6 +120,67 @@ fn endpoint_default_is_default_variant() {
     assert_eq!(endpoint, RmuxEndpoint::Default);
     assert!(endpoint.is_default());
     assert!(!RmuxEndpoint::WindowsPipe("rmux".to_owned()).is_default());
+}
+
+#[test]
+fn rmux_constructor_paths_preserve_default_endpoint() {
+    let direct = Rmux::new();
+    assert_eq!(direct.endpoint(), &RmuxEndpoint::Default);
+
+    let defaulted = Rmux::default();
+    assert_eq!(defaulted.endpoint(), &RmuxEndpoint::Default);
+
+    let builder_new = RmuxBuilder::new();
+    assert_eq!(builder_new.configured_endpoint(), &RmuxEndpoint::Default);
+
+    let builder_default = RmuxBuilder::default();
+    assert_eq!(
+        builder_default.configured_endpoint(),
+        &RmuxEndpoint::Default
+    );
+
+    assert_builder_records_endpoint(Rmux::builder(), &RmuxEndpoint::Default);
+    assert_eq!(
+        RmuxBuilder::new().build().endpoint(),
+        &RmuxEndpoint::Default
+    );
+    assert_eq!(
+        RmuxBuilder::default().build().endpoint(),
+        &RmuxEndpoint::Default
+    );
+}
+
+#[test]
+fn builder_endpoint_knobs_accept_all_endpoint_vocabulary() {
+    let unix = RmuxEndpoint::UnixSocket(PathBuf::from("/tmp/rmux-sdk.sock"));
+    let pipe = RmuxEndpoint::WindowsPipe("rmux-sdk".to_owned());
+
+    assert_builder_records_endpoint(
+        RmuxBuilder::new()
+            .endpoint(unix.clone())
+            .windows_pipe("rmux-sdk")
+            .default_endpoint(),
+        &RmuxEndpoint::Default,
+    );
+    assert_builder_records_endpoint(
+        RmuxBuilder::new()
+            .unix_socket("/tmp/rmux-sdk.sock")
+            .endpoint(RmuxEndpoint::Default),
+        &RmuxEndpoint::Default,
+    );
+    assert_builder_records_endpoint(
+        Rmux::builder()
+            .endpoint(RmuxEndpoint::Default)
+            .unix_socket(PathBuf::from("/tmp/rmux-sdk.sock")),
+        &unix,
+    );
+    assert_builder_records_endpoint(RmuxBuilder::default().windows_pipe("rmux-sdk"), &pipe);
+    assert_builder_records_endpoint(
+        RmuxBuilder::default()
+            .endpoint(RmuxEndpoint::Default)
+            .endpoint(pipe.clone()),
+        &pipe,
+    );
 }
 
 #[test]

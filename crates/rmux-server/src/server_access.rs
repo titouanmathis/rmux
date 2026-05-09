@@ -253,6 +253,7 @@ fn read_only_request_allowed(request: &Request) -> bool {
             | Request::CopyMode(_)
             | Request::ControlMode(_)
             | Request::ClockMode(_)
+            | Request::Handshake(_)
             | Request::ServerAccess(ServerAccessRequest { list: true, .. })
     )
 }

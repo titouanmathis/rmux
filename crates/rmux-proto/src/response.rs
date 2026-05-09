@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ControlModeResponse, LayoutName, RmuxError};
+use crate::{ControlModeResponse, HandshakeResponse, LayoutName, RmuxError};
 
 #[path = "response/session.rs"]
 mod session;
@@ -221,10 +221,12 @@ pub enum Response {
     UnlinkWindow(UnlinkWindowResponse),
     /// Success payload for internal detached target resolution.
     ResolveTarget(ResolveTargetResponse),
+    /// Success payload for SDK/daemon version and capability negotiation.
+    Handshake(HandshakeResponse),
 }
 
 impl Response {
-    /// Returns the stable public command name for the response variant.
+    /// Returns the stable routing name for the response variant.
     ///
     /// `Error` is not tied to one command on the current wire and therefore
     /// reports the generic `error` tag.
@@ -309,6 +311,7 @@ impl Response {
             Self::LinkWindow(_) => "link-window",
             Self::UnlinkWindow(_) => "unlink-window",
             Self::ResolveTarget(_) => "resolve-target",
+            Self::Handshake(_) => "handshake",
         }
     }
 
@@ -345,6 +348,7 @@ impl Response {
             Self::ServerAccess(response) => Some(response.command_output()),
             Self::ListClients(response) => Some(response.command_output()),
             Self::BreakPane(response) => response.command_output(),
+            Self::Handshake(_) => None,
             _ => None,
         }
     }
@@ -682,6 +686,10 @@ mod tests {
             })
             .command_name(),
             "error"
+        );
+        assert_eq!(
+            Response::Handshake(HandshakeResponse::current()).command_name(),
+            "handshake"
         );
     }
 }

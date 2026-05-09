@@ -1,5 +1,8 @@
 use rmux_proto::request::Request;
-use rmux_proto::{ControlModeResponse, ErrorResponse, Response, RmuxError};
+use rmux_proto::{
+    ControlModeResponse, ErrorResponse, HandshakeResponse, Response, RmuxError,
+    SUPPORTED_CAPABILITIES,
+};
 #[cfg(test)]
 use tokio::sync::broadcast;
 #[cfg(test)]
@@ -56,6 +59,15 @@ impl RequestHandler {
     }
 
     async fn dispatch_request(&self, requester_pid: u32, request: Request) -> HandleOutcome {
+        if let Request::Handshake(request) = request {
+            let response = if let Err(error) = request.validate_against(SUPPORTED_CAPABILITIES) {
+                Response::Error(ErrorResponse { error })
+            } else {
+                Response::Handshake(HandshakeResponse::current())
+            };
+            return HandleOutcome::response(response);
+        }
+
         if let Some(error) = self.take_startup_config_error().await {
             return HandleOutcome::response(Response::Error(ErrorResponse { error }));
         }

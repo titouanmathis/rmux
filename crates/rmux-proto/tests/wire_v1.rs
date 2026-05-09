@@ -20,12 +20,12 @@ use rmux_proto::{
     decode_frame, encode_frame, frame_kind_for_request, frame_kind_for_response, ledger_entry_for,
     BindKeyRequest, CapturePaneRequest, ClientTerminalContext, ClockModeRequest, ControlMode,
     ControlModeRequest, ControlModeResponse, DetachClientRequest, ErrorResponse, FrameDecoder,
-    FrameDirection, FrameFeature, FrameKind, FrameStatus, HasSessionRequest, HasSessionResponse,
-    HookLifecycle, HookName, KillServerResponse, KillSessionRequest, ListBuffersRequest,
-    NewSessionResponse, OptionName, PaneTarget, Request, ResolveTargetRequest, ResolveTargetType,
-    Response, RmuxError, ScopeSelector, SendKeysRequest, SendKeysResponse, SessionName,
-    SetHookRequest, SetOptionMode, SetOptionRequest, TerminalSize, WindowTarget, RMUX_FRAME_MAGIC,
-    RMUX_WIRE_VERSION, V1_FRAME_LEDGER,
+    FrameDirection, FrameFeature, FrameKind, FrameStatus, HandshakeRequest, HandshakeResponse,
+    HasSessionRequest, HasSessionResponse, HookLifecycle, HookName, KillServerResponse,
+    KillSessionRequest, ListBuffersRequest, NewSessionResponse, OptionName, PaneTarget, Request,
+    ResolveTargetRequest, ResolveTargetType, Response, RmuxError, ScopeSelector, SendKeysRequest,
+    SendKeysResponse, SessionName, SetHookRequest, SetOptionMode, SetOptionRequest, TerminalSize,
+    WindowTarget, RMUX_FRAME_MAGIC, RMUX_WIRE_VERSION, V1_FRAME_LEDGER,
 };
 
 fn fixture_root() -> PathBuf {
@@ -482,6 +482,7 @@ fn cross_section_requests() -> Vec<Request> {
             window_index: false,
             prefer_unattached: false,
         }),
+        Request::Handshake(HandshakeRequest::current()),
     ]
 }
 
@@ -502,6 +503,7 @@ fn cross_section_responses() -> Vec<Response> {
         Response::ControlMode(ControlModeResponse {
             mode: ControlMode::ControlControl,
         }),
+        Response::Handshake(HandshakeResponse::current()),
     ]
 }
 
@@ -549,8 +551,8 @@ fn ledger_active_size_matches_request_and_response_variant_count() {
         .iter()
         .filter(|entry| matches!(entry.status, FrameStatus::Active))
         .count();
-    // Active entries = 93 Request variants + 79 Response variants.
-    assert_eq!(active_count, 93 + 79, "active ledger size mismatch");
+    // Active entries = 94 Request variants + 80 Response variants.
+    assert_eq!(active_count, 94 + 80, "active ledger size mismatch");
 }
 
 #[test]

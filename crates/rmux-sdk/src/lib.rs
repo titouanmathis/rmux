@@ -16,6 +16,7 @@
 
 pub mod bootstrap;
 pub mod command;
+pub mod diagnostics;
 pub mod error;
 pub mod events;
 pub mod handles;
@@ -29,6 +30,11 @@ pub mod types;
 pub(crate) mod transport;
 
 pub use command::{RmuxCommand, RmuxCommandKind};
+pub use diagnostics::{
+    command_feature_id, protocol_diagnostic, unsupported_feature_id, Diagnostic,
+    DiagnosticSeverity, FEATURE_DAEMON_SHUTDOWN, FEATURE_PROTOCOL_CAPABILITIES,
+    FEATURE_PROTOCOL_WIRE_VERSION, FEATURE_TRANSPORT_UNIX_SOCKET, FEATURE_TRANSPORT_WINDOWS_PIPE,
+};
 pub use error::{CollectError, Result, RmuxError};
 pub use events::{
     PaneCommandStatus, PaneCommandSummary, PaneDisconnectReason, PaneEvent, PaneExitReason,

@@ -4,6 +4,7 @@
 //! Shared detached protocol types for RMUX.
 
 pub mod attach;
+pub mod capabilities;
 pub mod codec;
 pub mod control;
 pub mod envelope;
@@ -17,6 +18,11 @@ pub mod types;
 pub use attach::{
     encode_attach_message, AttachFrameDecoder, AttachMessage, AttachShellCommand,
     AttachedKeystroke, KeyDispatched,
+};
+pub use capabilities::{
+    HandshakeRequest, HandshakeResponse, CAPABILITY_ATTACH_STREAM, CAPABILITY_CONTROL_STREAM,
+    CAPABILITY_DAEMON_SHUTDOWN, CAPABILITY_DETACHED_RPC, CAPABILITY_FRAMED_ERRORS,
+    CAPABILITY_HANDSHAKE, SUPPORTED_CAPABILITIES,
 };
 pub use codec::{decode_frame, encode_frame, FrameDecoder, DEFAULT_MAX_FRAME_LENGTH};
 pub use control::{

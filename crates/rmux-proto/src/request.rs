@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::{ControlModeRequest, PaneTarget, SessionName, Target, WindowTarget};
+use crate::{ControlModeRequest, HandshakeRequest, PaneTarget, SessionName, Target, WindowTarget};
 
 #[path = "request/show.rs"]
 mod show;
@@ -84,7 +84,8 @@ pub use buffer::{
     LoadBufferRequest, PasteBufferRequest, SaveBufferRequest, SetBufferRequest, ShowBufferRequest,
 };
 
-/// All detached public command requests supported by the wire protocol.
+/// All detached public command and internal RPC requests supported by the wire
+/// protocol.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Request {
     /// `new-session`
@@ -273,10 +274,12 @@ pub enum Request {
     ResolveTarget(ResolveTargetRequest),
     /// Extended `split-window` semantics including an explicit shell command.
     SplitWindowExt(SplitWindowExtRequest),
+    /// Internal SDK/daemon version and capability negotiation.
+    Handshake(HandshakeRequest),
 }
 
 impl Request {
-    /// Returns the stable public command name for the request variant.
+    /// Returns the stable routing name for the request variant.
     #[must_use]
     pub const fn command_name(&self) -> &'static str {
         match self {
@@ -372,6 +375,7 @@ impl Request {
             Self::DetachClientExt(_) => "detach-client",
             Self::AttachSessionExt2(_) => "attach-session",
             Self::SwitchClientExt3(_) => "switch-client",
+            Self::Handshake(_) => "handshake",
         }
     }
 }
@@ -664,6 +668,10 @@ mod tests {
             })
             .command_name(),
             "resolve-target"
+        );
+        assert_eq!(
+            Request::Handshake(HandshakeRequest::current()).command_name(),
+            "handshake"
         );
     }
 }

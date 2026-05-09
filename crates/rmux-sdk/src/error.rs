@@ -8,6 +8,8 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 
+use crate::diagnostics;
+
 const PROTOCOL_HINT: &str =
     "check the request and daemon state, then retry after correcting the request";
 const TRANSPORT_HINT: &str = "verify the rmux daemon is running and the endpoint is reachable";
@@ -77,14 +79,18 @@ impl RmuxError {
                 minimum,
                 maximum,
             } => Self::unsupported(
-                "protocol.wire_version",
+                diagnostics::FEATURE_PROTOCOL_WIRE_VERSION,
                 format!(
                     "upgrade the rmux daemon or use an SDK that supports wire version {got} \
                      (supported range {minimum}..={maximum})"
                 ),
             ),
+            rmux_proto::RmuxError::UnsupportedCapability { feature, supported } => {
+                let hint = diagnostics::unsupported_capability_hint(&feature, &supported);
+                Self::unsupported(feature, hint)
+            }
             rmux_proto::RmuxError::UnknownCommand(command) => {
-                let feature = command_feature(&command);
+                let feature = diagnostics::command_feature_id(&command);
                 Self::unsupported(
                     feature,
                     format!(
@@ -302,22 +308,6 @@ fn sdk_errors_remain_non_clone() {
 
     assert_non_clone_guard::<RmuxError>();
     assert_non_clone_guard::<CollectError>();
-}
-
-fn command_feature(command: &str) -> String {
-    let token = command
-        .chars()
-        .map(|character| match character {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => character,
-            _ => '_',
-        })
-        .collect::<String>();
-
-    if token.is_empty() {
-        "command.<empty>".to_owned()
-    } else {
-        format!("command.{token}")
-    }
 }
 
 fn write_numbered_error(

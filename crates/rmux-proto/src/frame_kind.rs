@@ -105,6 +105,8 @@ pub enum FrameFeature {
     Targets,
     /// Control-mode upgrade and clock-mode mounts.
     Control,
+    /// Version and capability negotiation.
+    Protocol,
     /// Error envelopes.
     Errors,
     /// Reserved for future extensions.
@@ -1006,6 +1008,15 @@ pub const V1_FRAME_LEDGER: &[FrameLedgerEntry] = &[
         None,
         "v1 baseline; pinned bincode tag 92.",
     ),
+    entry(
+        c2s(93),
+        FrameDirection::ClientToServer,
+        ACTIVE,
+        "HandshakeRequest",
+        FrameFeature::Protocol,
+        None,
+        "v1 capability negotiation; pinned bincode tag 93.",
+    ),
     // Reserved client→server slot. Removed values must be listed and never reused.
     entry(
         c2s(0x7FFE),
@@ -1737,6 +1748,15 @@ pub const V1_FRAME_LEDGER: &[FrameLedgerEntry] = &[
         None,
         "v1 baseline; pinned bincode tag 78.",
     ),
+    entry(
+        s2c(79),
+        FrameDirection::ServerToClient,
+        ACTIVE,
+        "HandshakeResponse",
+        FrameFeature::Protocol,
+        None,
+        "v1 capability negotiation; pinned bincode tag 79.",
+    ),
     // Reserved server→client slot. Removed values must be listed and never reused.
     entry(
         s2c(0x7FFE),
@@ -1859,6 +1879,7 @@ pub const fn frame_kind_for_request(request: &Request) -> FrameKind {
         Request::SelectPaneMark(_) => c2s(90),
         Request::ResolveTarget(_) => c2s(91),
         Request::SplitWindowExt(_) => c2s(92),
+        Request::Handshake(_) => c2s(93),
     }
 }
 
@@ -1945,6 +1966,7 @@ pub const fn frame_kind_for_response(response: &Response) -> FrameKind {
         Response::LinkWindow(_) => s2c(76),
         Response::UnlinkWindow(_) => s2c(77),
         Response::ResolveTarget(_) => s2c(78),
+        Response::Handshake(_) => s2c(79),
     }
 }
 

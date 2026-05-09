@@ -377,7 +377,10 @@ fn remove_regular_file_if_present(path: &Path) -> io::Result<()> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use rmux_proto::{ErrorResponse, RmuxError, WaitForMode, WaitForRequest, WaitForResponse};
+    use rmux_proto::{
+        ErrorResponse, HandshakeRequest, RmuxError, WaitForMode, WaitForRequest, WaitForResponse,
+        RMUX_WIRE_VERSION,
+    };
 
     #[tokio::test]
     async fn client_disconnect_cancels_plain_waiter() -> io::Result<()> {
@@ -429,6 +432,109 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn read_request_sends_framed_error_for_unsupported_wire_version() -> io::Result<()> {
+        let (server, mut client) = LocalStream::pair()?;
+        let mut connection = Connection::new(server);
+        let read_task = tokio::spawn(async move { connection.read_request().await });
+
+        let mut frame = encode_frame(&wait_for("bad-wire-version", WaitForMode::Signal))
+            .map_err(io::Error::other)?;
+        assert_eq!(frame.get(1).copied(), Some(RMUX_WIRE_VERSION as u8));
+        frame[1] = RMUX_WIRE_VERSION.saturating_add(1) as u8;
+        client.write_all(&frame).await?;
+
+        let response = read_test_response(&mut client).await?;
+        assert!(matches!(
+            response,
+            Response::Error(ErrorResponse {
+                error: RmuxError::UnsupportedWireVersion { .. },
+            })
+        ));
+        assert!(read_task.await.expect("read task")?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn read_request_sends_framed_error_for_decode_mismatch() -> io::Result<()> {
+        let (server, mut client) = LocalStream::pair()?;
+        let mut connection = Connection::new(server);
+        let read_task = tokio::spawn(async move { connection.read_request().await });
+
+        let payload = 255_u32.to_le_bytes();
+        let mut frame = vec![rmux_proto::RMUX_FRAME_MAGIC, RMUX_WIRE_VERSION as u8];
+        frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        frame.extend_from_slice(&payload);
+        client.write_all(&frame).await?;
+
+        let response = read_test_response(&mut client).await?;
+        assert!(matches!(
+            response,
+            Response::Error(ErrorResponse {
+                error: RmuxError::Decode(_),
+            })
+        ));
+        assert!(read_task.await.expect("read task")?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn handshake_rejects_unsupported_wire_version_range() -> io::Result<()> {
+        let handler = Arc::new(RequestHandler::new());
+        let (mut client, _shutdown_tx, connection_task) = spawn_test_connection(&handler)?;
+
+        write_test_request(
+            &mut client,
+            Request::Handshake(HandshakeRequest {
+                minimum_wire_version: RMUX_WIRE_VERSION + 1,
+                maximum_wire_version: RMUX_WIRE_VERSION + 1,
+                required_capabilities: Vec::new(),
+            }),
+        )
+        .await?;
+
+        let response = read_test_response(&mut client).await?;
+        assert!(matches!(
+            response,
+            Response::Error(ErrorResponse {
+                error: RmuxError::UnsupportedWireVersion { .. },
+            })
+        ));
+
+        drop(client);
+        connection_task.await.expect("connection task")?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn handshake_rejects_unsupported_required_capability() -> io::Result<()> {
+        let handler = Arc::new(RequestHandler::new());
+        let (mut client, _shutdown_tx, connection_task) = spawn_test_connection(&handler)?;
+
+        write_test_request(
+            &mut client,
+            Request::Handshake(HandshakeRequest::requiring(["capability.future"])),
+        )
+        .await?;
+
+        let response = read_test_response(&mut client).await?;
+        match response {
+            Response::Error(ErrorResponse {
+                error: RmuxError::UnsupportedCapability { feature, supported },
+            }) => {
+                assert_eq!(feature, "capability.future");
+                assert!(supported
+                    .iter()
+                    .any(|capability| capability == "rpc.detached"));
+            }
+            response => panic!("expected unsupported capability error, got {response:?}"),
+        }
+
+        drop(client);
+        connection_task.await.expect("connection task")?;
+        Ok(())
+    }
+
     fn spawn_test_connection(
         handler: &Arc<RequestHandler>,
     ) -> io::Result<(
@@ -467,6 +573,26 @@ mod tests {
     async fn write_test_request(stream: &mut LocalStream, request: Request) -> io::Result<()> {
         let frame = encode_frame(&request).map_err(io::Error::other)?;
         stream.write_all(&frame).await
+    }
+
+    async fn read_test_response(stream: &mut LocalStream) -> io::Result<Response> {
+        let mut decoder = FrameDecoder::new();
+        let mut buffer = [0_u8; 512];
+
+        loop {
+            if let Some(response) = decoder.next_frame::<Response>().map_err(io::Error::other)? {
+                return Ok(response);
+            }
+
+            let bytes_read = stream.read(&mut buffer).await?;
+            if bytes_read == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "server closed before response frame",
+                ));
+            }
+            decoder.push_bytes(&buffer[..bytes_read]);
+        }
     }
 
     async fn yield_until_counts(

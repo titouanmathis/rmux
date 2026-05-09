@@ -13,6 +13,7 @@ use crate::{Result, RmuxError};
 
 const ACTOR_QUEUE_CAPACITY: usize = 64;
 const READ_BUFFER_SIZE: usize = 8192;
+const TRANSPORT_SHUTDOWN_OPERATION: &str = "shut down rmux SDK transport";
 
 #[derive(Clone)]
 pub(crate) struct TransportClient {
@@ -48,6 +49,25 @@ impl TransportClient {
             .map_err(|_| self.closed_error(&operation))?;
 
         response.await.map_err(|_| self.closed_error(&operation))?
+    }
+
+    pub(crate) async fn shutdown(&self) -> Result<()> {
+        if let Some(failure) = self.state.terminal_failure() {
+            if failure.is_eof() {
+                return Ok(());
+            }
+            return Err(failure.to_error(TRANSPORT_SHUTDOWN_OPERATION));
+        }
+
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(ActorMessage::Shutdown { reply })
+            .await
+            .map_err(|_| self.closed_error(TRANSPORT_SHUTDOWN_OPERATION))?;
+
+        response
+            .await
+            .map_err(|_| self.closed_error(TRANSPORT_SHUTDOWN_OPERATION))?
     }
 
     fn try_send_best_effort(&self, request: Request) {
@@ -86,13 +106,17 @@ impl DropGuard {
         }
     }
 
-    fn best_effort(client: TransportClient, request: Request) -> Self {
+    pub(crate) fn best_effort(client: TransportClient, request: Request) -> Self {
         Self {
             action: DropAction::BestEffort {
                 client,
                 request: Some(Box::new(request)),
             },
         }
+    }
+
+    pub(crate) fn disarm(&mut self) {
+        self.action = DropAction::None;
     }
 }
 
@@ -124,6 +148,9 @@ enum ActorMessage {
     },
     BestEffort {
         request: Request,
+    },
+    Shutdown {
+        reply: oneshot::Sender<Result<()>>,
     },
 }
 
@@ -184,7 +211,8 @@ impl PendingCall {
 
     fn fail(self, failure: &TransportFailure) {
         if let Some(reply) = self.reply {
-            let _ = reply.send(Err(failure.to_error(&self.operation)));
+            let error = failure.to_error_for_command(&self.operation, self.command_name);
+            let _ = reply.send(Err(error));
         }
     }
 }
@@ -199,72 +227,98 @@ where
     let read_task = tokio::spawn(forward_responses(reader, events));
     let mut pending = VecDeque::new();
     let mut commands_closed = false;
+    let mut shutdown_reply = None;
 
     while let Some(event) = event_receiver.recv().await {
         match event {
-            ActorEvent::Command(message) => match message {
-                ActorMessage::Request {
-                    request,
-                    operation,
-                    reply,
-                } => {
-                    let command_name = request.command_name();
-                    let frame = match encode_request(&request) {
-                        Ok(frame) => frame,
-                        Err(failure) => {
-                            let _ = reply.send(Err(failure.to_error(&operation)));
-                            continue;
+            ActorEvent::Command(message) => {
+                if shutdown_reply.is_some() {
+                    reject_command_after_shutdown(message);
+                    continue;
+                }
+
+                match message {
+                    ActorMessage::Request {
+                        request,
+                        operation,
+                        reply,
+                    } => {
+                        let command_name = request.command_name();
+                        let frame = match encode_request(&request) {
+                            Ok(frame) => frame,
+                            Err(failure) => {
+                                let _ = reply.send(Err(failure.to_error(&operation)));
+                                continue;
+                            }
+                        };
+                        pending.push_back(PendingCall::reply(command_name, operation, reply));
+                        if let Err(failure) = write_frame(&mut writer, &frame).await {
+                            fail_transport(&mut pending, &state, failure);
+                            break;
                         }
-                    };
-                    pending.push_back(PendingCall::reply(command_name, operation, reply));
-                    if let Err(failure) = write_frame(&mut writer, &frame).await {
-                        fail_transport(&mut pending, &state, failure);
-                        break;
+                    }
+                    ActorMessage::BestEffort { request } => {
+                        let command_name = request.command_name();
+                        let Ok(frame) = encode_request(&request) else {
+                            continue;
+                        };
+                        pending.push_back(PendingCall::discard(
+                            command_name,
+                            request_operation(&request),
+                        ));
+                        if let Err(failure) = write_frame(&mut writer, &frame).await {
+                            fail_transport(&mut pending, &state, failure);
+                            break;
+                        }
+                    }
+                    ActorMessage::Shutdown { reply } => {
+                        match writer.shutdown().await.map_err(TransportFailure::io) {
+                            Ok(()) => {
+                                shutdown_reply = Some(reply);
+                            }
+                            Err(failure) => {
+                                let _ =
+                                    reply.send(Err(failure.to_error(TRANSPORT_SHUTDOWN_OPERATION)));
+                                fail_transport(&mut pending, &state, failure);
+                                break;
+                            }
+                        }
                     }
                 }
-                ActorMessage::BestEffort { request } => {
-                    let command_name = request.command_name();
-                    let Ok(frame) = encode_request(&request) else {
-                        continue;
-                    };
-                    pending.push_back(PendingCall::discard(
-                        command_name,
-                        request_operation(&request),
-                    ));
-                    if let Err(failure) = write_frame(&mut writer, &frame).await {
-                        fail_transport(&mut pending, &state, failure);
-                        break;
-                    }
-                }
-            },
+            }
             ActorEvent::CommandsClosed => {
                 commands_closed = true;
             }
             ActorEvent::Response(result) => match result {
                 Ok(response) => {
                     let Some(pending_call) = pending.pop_front() else {
-                        fail_transport(
-                            &mut pending,
-                            &state,
-                            TransportFailure::unsolicited_response(&response),
-                        );
+                        let failure = TransportFailure::unsolicited_response(&response);
+                        fail_shutdown(&mut shutdown_reply, &failure);
+                        fail_transport(&mut pending, &state, failure);
                         break;
                     };
                     if let Err(failure) = pending_call.validate_response(&response) {
                         pending_call.fail(&failure);
+                        fail_shutdown(&mut shutdown_reply, &failure);
                         fail_transport(&mut pending, &state, failure);
                         break;
                     }
                     pending_call.complete(response);
                 }
                 Err(failure) => {
+                    if shutdown_reply.is_some() && pending.is_empty() && failure.is_eof() {
+                        complete_shutdown(&mut shutdown_reply);
+                        break;
+                    }
+
+                    fail_shutdown(&mut shutdown_reply, &failure);
                     fail_transport(&mut pending, &state, failure);
                     break;
                 }
             },
         }
 
-        if commands_closed && pending.is_empty() {
+        if commands_closed && pending.is_empty() && shutdown_reply.is_none() {
             let _ = writer.shutdown().await;
             break;
         }
@@ -272,6 +326,34 @@ where
 
     command_task.abort();
     read_task.abort();
+}
+
+fn reject_command_after_shutdown(message: ActorMessage) {
+    match message {
+        ActorMessage::Request {
+            operation, reply, ..
+        } => {
+            let failure = TransportFailure::actor_closed();
+            let _ = reply.send(Err(failure.to_error(&operation)));
+        }
+        ActorMessage::BestEffort { .. } => {}
+        ActorMessage::Shutdown { reply } => {
+            let failure = TransportFailure::actor_closed();
+            let _ = reply.send(Err(failure.to_error(TRANSPORT_SHUTDOWN_OPERATION)));
+        }
+    }
+}
+
+fn complete_shutdown(reply: &mut Option<oneshot::Sender<Result<()>>>) {
+    if let Some(reply) = reply.take() {
+        let _ = reply.send(Ok(()));
+    }
+}
+
+fn fail_shutdown(reply: &mut Option<oneshot::Sender<Result<()>>>, failure: &TransportFailure) {
+    if let Some(reply) = reply.take() {
+        let _ = reply.send(Err(failure.to_error(TRANSPORT_SHUTDOWN_OPERATION)));
+    }
 }
 
 async fn forward_commands(
@@ -403,6 +485,7 @@ impl TransportState {
 struct TransportFailure {
     kind: io::ErrorKind,
     message: String,
+    protocol_error: Option<rmux_proto::RmuxError>,
 }
 
 impl TransportFailure {
@@ -410,13 +493,16 @@ impl TransportFailure {
         Self {
             kind: error.kind(),
             message: error.to_string(),
+            protocol_error: None,
         }
     }
 
     fn frame(error: rmux_proto::RmuxError) -> Self {
+        let message = error.to_string();
         Self {
             kind: io::ErrorKind::InvalidData,
-            message: error.to_string(),
+            message,
+            protocol_error: Some(error),
         }
     }
 
@@ -424,6 +510,7 @@ impl TransportFailure {
         Self {
             kind: io::ErrorKind::UnexpectedEof,
             message: "rmux daemon closed the transport".to_owned(),
+            protocol_error: None,
         }
     }
 
@@ -433,6 +520,7 @@ impl TransportFailure {
             message: format!(
                 "rmux daemon sent `{actual}` response for pending `{expected}` request"
             ),
+            protocol_error: None,
         }
     }
 
@@ -443,6 +531,7 @@ impl TransportFailure {
                 "rmux daemon sent unsolicited `{}` response",
                 response.command_name()
             ),
+            protocol_error: None,
         }
     }
 
@@ -450,11 +539,39 @@ impl TransportFailure {
         Self {
             kind: io::ErrorKind::BrokenPipe,
             message: "rmux transport actor is closed".to_owned(),
+            protocol_error: None,
         }
+    }
+
+    const fn is_eof(&self) -> bool {
+        matches!(self.kind, io::ErrorKind::UnexpectedEof)
     }
 
     fn to_error(&self, operation: &str) -> RmuxError {
         RmuxError::transport(operation, io::Error::new(self.kind, self.message.clone()))
+    }
+
+    fn to_error_for_command(&self, operation: &str, command_name: &'static str) -> RmuxError {
+        if command_name == "handshake" {
+            if let Some(error) = self.protocol_error.as_ref() {
+                return handshake_protocol_error(error);
+            }
+        }
+
+        self.to_error(operation)
+    }
+}
+
+fn handshake_protocol_error(error: &rmux_proto::RmuxError) -> RmuxError {
+    match error {
+        rmux_proto::RmuxError::Decode(message) => RmuxError::unsupported(
+            crate::diagnostics::FEATURE_PROTOCOL_CAPABILITIES,
+            format!(
+                "upgrade the rmux daemon to one that advertises `{}` before using SDK capability negotiation; {message}",
+                rmux_proto::CAPABILITY_HANDSHAKE
+            ),
+        ),
+        error => RmuxError::protocol(error.clone()),
     }
 }
 

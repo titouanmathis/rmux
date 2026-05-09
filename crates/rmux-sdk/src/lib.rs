@@ -3,9 +3,9 @@
 
 //! Public daemon-backed RMUX SDK scaffolding.
 //!
-//! v1 introduces a fully daemon-backed public SDK. This crate currently
-//! exposes the compile-time vocabulary, inert facade handles, and facade-error
-//! skeletons that pin the public SDK boundary.
+//! v1 introduces a fully daemon-backed public SDK. This crate exposes the
+//! compile-time vocabulary, facade handles, session ensure builders, and
+//! facade-error skeletons that pin the public SDK boundary.
 //!
 //! `rmux-sdk` is a public integration peer of `rmux-client` and must not
 //! depend on `rmux-client`, `rmux-core`, `rmux-server`, or `rmux-pty` as
@@ -17,6 +17,7 @@
 pub mod bootstrap;
 pub mod command;
 pub mod diagnostics;
+pub mod ensure;
 pub mod error;
 pub mod events;
 pub mod handles;
@@ -35,12 +36,13 @@ pub use diagnostics::{
     DiagnosticSeverity, FEATURE_DAEMON_SHUTDOWN, FEATURE_PROTOCOL_CAPABILITIES,
     FEATURE_PROTOCOL_WIRE_VERSION, FEATURE_TRANSPORT_UNIX_SOCKET, FEATURE_TRANSPORT_WINDOWS_PIPE,
 };
+pub use ensure::{EnsureSession, EnsureSessionPolicy};
 pub use error::{CollectError, Result, RmuxError};
 pub use events::{
     PaneCommandStatus, PaneCommandSummary, PaneDisconnectReason, PaneEvent, PaneExitReason,
     PaneNotification, PanePermissionScope,
 };
-pub use handles::{Rmux, RmuxBuilder};
+pub use handles::{Rmux, RmuxBuilder, Session};
 pub use info::{InfoSnapshot, PaneExitState, PaneInfo, PaneProcessState, SessionInfo, WindowInfo};
 pub use input::{
     DetachChord, DetachDetector, DetachOutcome, KeyCode, KeyConversionError, KeyEvent, KeyModifiers,

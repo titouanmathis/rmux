@@ -16,7 +16,10 @@ use std::error::Error as StdError;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
-use rmux_sdk::{Result, Rmux, RmuxBuilder, RmuxEndpoint, RmuxError, SessionName};
+use rmux_sdk::{
+    EnsureSession, EnsureSessionPolicy, Result, Rmux, RmuxBuilder, RmuxEndpoint, RmuxError,
+    Session, SessionName,
+};
 
 fn assert_send<T: Send>() {}
 fn assert_sync<T: Sync>() {}
@@ -51,6 +54,26 @@ fn _assert_bounds() {
     assert_default::<RmuxBuilder>();
     assert_debug::<RmuxBuilder>();
 
+    assert_send::<Session>();
+    assert_sync::<Session>();
+    assert_static::<Session>();
+    assert_debug::<Session>();
+
+    assert_send::<EnsureSession>();
+    assert_sync::<EnsureSession>();
+    assert_static::<EnsureSession>();
+    assert_default::<EnsureSession>();
+    assert_clone::<EnsureSession>();
+    assert_debug::<EnsureSession>();
+
+    assert_send::<EnsureSessionPolicy>();
+    assert_sync::<EnsureSessionPolicy>();
+    assert_static::<EnsureSessionPolicy>();
+    assert_default::<EnsureSessionPolicy>();
+    assert_clone::<EnsureSessionPolicy>();
+    assert_eq_hash::<EnsureSessionPolicy>();
+    assert_debug::<EnsureSessionPolicy>();
+
     assert_send::<RmuxEndpoint>();
     assert_sync::<RmuxEndpoint>();
     assert_static::<RmuxEndpoint>();
@@ -76,6 +99,10 @@ fn _assert_bounds() {
     assert_send::<Result<Rmux>>();
     assert_sync::<Result<Rmux>>();
     assert_static::<Result<Rmux>>();
+
+    assert_send::<Result<Session>>();
+    assert_sync::<Result<Session>>();
+    assert_static::<Result<Session>>();
 }
 
 #[test]
@@ -90,6 +117,20 @@ fn rmux_builder_is_send_sync_static() {
     assert_send::<RmuxBuilder>();
     assert_sync::<RmuxBuilder>();
     assert_static::<RmuxBuilder>();
+}
+
+#[test]
+fn session_handle_is_send_sync_static() {
+    assert_send::<Session>();
+    assert_sync::<Session>();
+    assert_static::<Session>();
+}
+
+#[test]
+fn ensure_session_builder_is_send_sync_static() {
+    assert_send::<EnsureSession>();
+    assert_sync::<EnsureSession>();
+    assert_static::<EnsureSession>();
 }
 
 #[test]

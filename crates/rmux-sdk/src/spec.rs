@@ -5,6 +5,8 @@
 //! processes, probe endpoint paths, parse tmux command text, or resolve
 //! targets.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::types::{PaneRef, TerminalSizeSpec};
@@ -14,7 +16,7 @@ use crate::SessionName;
 ///
 /// The SDK stores argv and environment overrides as supplied. It does not
 /// split shell text, read the caller environment, or infer a working directory.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessSpec {
     /// Optional command argv. Protocol handlers decide how a single argument
     /// is executed; the SDK does not parse or rewrite it.
@@ -23,6 +25,15 @@ pub struct ProcessSpec {
     /// Optional per-spawn environment overrides in `NAME=VALUE` form.
     #[serde(default)]
     pub environment: Option<Vec<String>>,
+}
+
+impl fmt::Debug for ProcessSpec {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProcessSpec")
+            .field("command", &self.command)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Reuse-related flags for `new-session` specs.

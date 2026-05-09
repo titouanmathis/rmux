@@ -11,7 +11,10 @@ use crate::diagnostics::FEATURE_TRANSPORT_UNIX_SOCKET;
 #[cfg(unix)]
 use crate::diagnostics::FEATURE_TRANSPORT_WINDOWS_PIPE;
 use crate::transport::{DropGuard, TransportClient};
-use crate::{bootstrap::discovery, Result, RmuxEndpoint, RmuxError};
+use crate::{
+    bootstrap::discovery, ensure::EnsureSession, handles::Session, Result, RmuxEndpoint, RmuxError,
+    SessionName,
+};
 use rmux_proto::{
     HandshakeRequest, KillServerRequest, Request, Response, CAPABILITY_DAEMON_SHUTDOWN,
     CAPABILITY_HANDSHAKE, RMUX_WIRE_VERSION,
@@ -70,6 +73,33 @@ impl Rmux {
         discovery::resolve_timeout(per_operation_timeout, self.default_timeout)
     }
 
+    /// Ensures a daemon session from a session builder.
+    pub async fn ensure_session(&self, ensure: EnsureSession) -> Result<Session> {
+        ensure.ensure(self).await
+    }
+
+    /// Returns a handle for an existing daemon session.
+    pub async fn session(&self, session_name: SessionName) -> Result<Session> {
+        self.ensure_session(EnsureSession::named(session_name).reuse_only())
+            .await
+    }
+
+    /// Checks the live daemon for an exact session name.
+    pub async fn has_session(&self, session_name: SessionName) -> Result<bool> {
+        let client = self
+            .connect_transport_for_operation(self.resolved_timeout(None))
+            .await?;
+        super::session::has_session(&client, session_name).await
+    }
+
+    /// Lists exact session names currently reported by the daemon.
+    pub async fn list_sessions(&self) -> Result<Vec<SessionName>> {
+        let client = self
+            .connect_transport_for_operation(self.resolved_timeout(None))
+            .await?;
+        super::session::list_session_names(&client).await
+    }
+
     /// Negotiates daemon capabilities, requests daemon shutdown, and waits for
     /// the SDK transport to close.
     ///
@@ -89,7 +119,11 @@ impl Rmux {
             .await?;
         match response {
             Response::KillServer(_) => {
-                client.shutdown().await?;
+                if let Err(error) = client.shutdown().await {
+                    if !is_clean_shutdown_close(&error) {
+                        return Err(error);
+                    }
+                }
                 Ok(())
             }
             Response::Error(error) => Err(error.into()),
@@ -129,6 +163,43 @@ impl Rmux {
         let endpoint = self.resolved_endpoint()?;
         connect_transport(&endpoint, self.resolved_timeout(None)).await
     }
+
+    pub(crate) async fn connect_transport_for_operation(
+        &self,
+        timeout: Option<Duration>,
+    ) -> Result<TransportClient> {
+        if let Some(client) = self.transport.as_ref() {
+            return Ok(client.clone());
+        }
+
+        let endpoint = self.resolved_endpoint()?;
+        connect_transport(&endpoint, timeout).await
+    }
+
+    pub(crate) async fn connect_resolved_transport_for_operation(
+        &self,
+        endpoint: &RmuxEndpoint,
+        timeout: Option<Duration>,
+    ) -> Result<TransportClient> {
+        if let Some(client) = self.transport.as_ref() {
+            return Ok(client.clone());
+        }
+
+        connect_transport(endpoint, timeout).await
+    }
+}
+
+fn is_clean_shutdown_close(error: &RmuxError) -> bool {
+    matches!(
+        error,
+        RmuxError::Transport { source, .. }
+            if matches!(
+                source.kind(),
+                io::ErrorKind::UnexpectedEof
+                    | io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::BrokenPipe
+            )
+    )
 }
 
 impl Default for Rmux {

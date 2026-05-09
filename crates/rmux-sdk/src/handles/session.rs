@@ -1,0 +1,167 @@
+//! Daemon-backed session handle.
+
+use std::fmt;
+use std::time::Duration;
+
+use crate::transport::TransportClient;
+use crate::{Result, RmuxEndpoint, RmuxError, SessionName};
+use rmux_proto::{HasSessionRequest, KillSessionRequest, ListSessionsRequest, Request, Response};
+
+/// Opaque handle for one live daemon session.
+///
+/// The handle stores the daemon transport and exact protocol-owned session
+/// name. It never stores process environment supplied while creating the
+/// session.
+pub struct Session {
+    name: SessionName,
+    endpoint: RmuxEndpoint,
+    default_timeout: Option<Duration>,
+    transport: TransportClient,
+    created: bool,
+    creation_tags: Option<Vec<String>>,
+}
+
+impl Session {
+    pub(crate) fn new(
+        name: SessionName,
+        endpoint: RmuxEndpoint,
+        default_timeout: Option<Duration>,
+        transport: TransportClient,
+        created: bool,
+        creation_tags: Option<Vec<String>>,
+    ) -> Self {
+        Self {
+            name,
+            endpoint,
+            default_timeout,
+            transport,
+            created,
+            creation_tags,
+        }
+    }
+
+    /// Returns the exact protocol-owned session name addressed by this handle.
+    #[must_use]
+    pub fn name(&self) -> &SessionName {
+        &self.name
+    }
+
+    /// Returns the endpoint that was resolved when this handle was created.
+    #[must_use]
+    pub fn endpoint(&self) -> &RmuxEndpoint {
+        &self.endpoint
+    }
+
+    /// Returns the default timeout configured on the parent facade.
+    #[must_use]
+    pub const fn configured_default_timeout(&self) -> Option<Duration> {
+        self.default_timeout
+    }
+
+    /// Returns whether the ensure operation created the session.
+    ///
+    /// `false` means the handle was bound to a session that already existed
+    /// before the ensure request completed.
+    #[must_use]
+    pub const fn was_created(&self) -> bool {
+        self.created
+    }
+
+    /// Returns caller-supplied creation tag intent, preserving explicit empty
+    /// tag sets.
+    #[must_use]
+    pub fn creation_tags(&self) -> Option<&[String]> {
+        self.creation_tags.as_deref()
+    }
+
+    /// Checks the live daemon for this session.
+    pub async fn exists(&self) -> Result<bool> {
+        has_session(&self.transport, self.name.clone()).await
+    }
+
+    /// Checks whether this session appears in the daemon's `list-sessions`
+    /// projection.
+    pub async fn is_listed(&self) -> Result<bool> {
+        Ok(list_session_names(&self.transport)
+            .await?
+            .iter()
+            .any(|candidate| candidate == &self.name))
+    }
+
+    /// Lists exact session names currently reported by the daemon.
+    pub async fn list_session_names(&self) -> Result<Vec<SessionName>> {
+        list_session_names(&self.transport).await
+    }
+
+    /// Destroys this session through the daemon.
+    ///
+    /// The returned boolean mirrors the daemon response: `true` means a
+    /// session existed and was removed.
+    pub async fn kill(&self) -> Result<bool> {
+        kill_session(&self.transport, self.name.clone()).await
+    }
+}
+
+impl fmt::Debug for Session {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Session")
+            .field("name", &self.name)
+            .field("created", &self.created)
+            .field("creation_tags", &self.creation_tags)
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) async fn has_session(client: &TransportClient, name: SessionName) -> Result<bool> {
+    match client
+        .request(Request::HasSession(HasSessionRequest { target: name }))
+        .await?
+    {
+        Response::HasSession(response) => Ok(response.exists),
+        response => Err(unexpected_response("has-session", response)),
+    }
+}
+
+pub(crate) async fn kill_session(client: &TransportClient, name: SessionName) -> Result<bool> {
+    match client
+        .request(Request::KillSession(KillSessionRequest {
+            target: name,
+            kill_all_except_target: false,
+            clear_alerts: false,
+        }))
+        .await?
+    {
+        Response::KillSession(response) => Ok(response.existed),
+        response => Err(unexpected_response("kill-session", response)),
+    }
+}
+
+pub(crate) async fn list_session_names(client: &TransportClient) -> Result<Vec<SessionName>> {
+    let response = client
+        .request(Request::ListSessions(ListSessionsRequest {
+            format: Some("#{session_name}".to_owned()),
+            filter: None,
+            sort_order: Some("name".to_owned()),
+            reversed: false,
+        }))
+        .await?;
+
+    let output = match response {
+        Response::ListSessions(response) => response.output.stdout,
+        response => return Err(unexpected_response("list-sessions", response)),
+    };
+
+    String::from_utf8_lossy(&output)
+        .lines()
+        .map(SessionName::new)
+        .collect::<core::result::Result<Vec<_>, _>>()
+        .map_err(RmuxError::protocol)
+}
+
+pub(crate) fn unexpected_response(expected: &'static str, response: Response) -> RmuxError {
+    RmuxError::protocol(rmux_proto::RmuxError::Server(format!(
+        "rmux daemon sent `{}` response for `{expected}` request",
+        response.command_name()
+    )))
+}

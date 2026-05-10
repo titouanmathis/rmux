@@ -20,6 +20,7 @@ pub mod diagnostics;
 pub mod ensure;
 pub mod error;
 pub mod events;
+pub mod extract;
 pub mod handles;
 pub mod info;
 pub mod input;
@@ -44,6 +45,7 @@ pub use events::{
     PaneLagNotice, PaneLineItem, PaneLineStream, PaneNotification, PaneOutputChunk,
     PaneOutputStart, PaneOutputStream, PanePermissionScope, PaneRecentOutput,
 };
+pub use extract::{CollectedPaneOutput, PaneTextMatch};
 pub use handles::{Pane, Rmux, RmuxBuilder, Session, Window, WindowCloseOutcome, WindowPane};
 pub use info::{InfoSnapshot, PaneExitState, PaneInfo, PaneProcessState, SessionInfo, WindowInfo};
 pub use input::{

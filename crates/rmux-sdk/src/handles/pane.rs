@@ -17,9 +17,10 @@ use crate::events::streams::{PaneLineStream, PaneOutputStart, PaneOutputStream};
 use crate::handles::session::unexpected_response;
 use crate::transport::TransportClient;
 use crate::{
-    ArmedWait, InfoSnapshot, PaneAttributes, PaneCell, PaneColor, PaneCursor, PaneExitState,
-    PaneGlyph, PaneId, PaneInfo, PaneProcessState, PaneRef, PaneSnapshot, Result, RmuxEndpoint,
-    RmuxError, SessionId, SessionInfo, TerminalSizeSpec, WindowId, WindowInfo,
+    ArmedWait, CollectedPaneOutput, InfoSnapshot, PaneAttributes, PaneCell, PaneColor, PaneCursor,
+    PaneExitState, PaneGlyph, PaneId, PaneInfo, PaneProcessState, PaneRef, PaneSnapshot,
+    PaneTextMatch, Result, RmuxEndpoint, RmuxError, SessionId, SessionInfo, TerminalSizeSpec,
+    WindowId, WindowInfo,
 };
 use rmux_proto::{
     DisplayMessageRequest, ListPanesRequest, ListSessionsRequest, ListWindowsRequest,
@@ -139,6 +140,21 @@ impl Pane {
         crate::wait::wait_for_text_next(self, text.as_ref().to_owned()).await
     }
 
+    /// Waits until the pane process exits or the pane slot becomes stale.
+    ///
+    /// The wait polls daemon sticky pane metadata through [`Self::info`].
+    /// It does not subscribe to raw output and does not send SDK byte-wait
+    /// cancellation requests. `Ok(None)` means the pane was already stale, or
+    /// vanished before the daemon could retain exit details for this slot.
+    pub async fn wait_exit(&self) -> Result<Option<PaneExitState>> {
+        crate::wait::wait_exit(self).await
+    }
+
+    /// Alias for [`Self::wait_exit`].
+    pub async fn wait_for_exit(&self) -> Result<Option<PaneExitState>> {
+        self.wait_exit().await
+    }
+
     /// Subscribes to the live raw pane output as a typed byte stream.
     ///
     /// Setup performs one `subscribe-pane-output` round trip and is
@@ -167,6 +183,30 @@ impl Pane {
         start: PaneOutputStart,
     ) -> Result<PaneOutputStream> {
         PaneOutputStream::open(self.transport.clone(), self.target.to_proto(), start).await
+    }
+
+    /// Collects bounded raw pane output bytes until the pane process exits.
+    ///
+    /// Collection starts at the live output cursor, retains at most
+    /// `max_bytes`, and keeps waiting for pane exit even after the cap is
+    /// reached. Returned bytes are raw pane-output bytes; lag notices are
+    /// reported on the returned [`CollectedPaneOutput`] and are not spliced
+    /// into the byte buffer.
+    pub async fn collect_output_until_exit(&self, max_bytes: usize) -> Result<CollectedPaneOutput> {
+        crate::extract::collect_output_until_exit(self, max_bytes).await
+    }
+
+    /// Collects bounded raw pane output from the requested stream start until
+    /// the pane process exits.
+    ///
+    /// See [`Self::collect_output_until_exit`] for cap, lag, and byte
+    /// preservation semantics.
+    pub async fn collect_output_until_exit_starting_at(
+        &self,
+        start: PaneOutputStart,
+        max_bytes: usize,
+    ) -> Result<CollectedPaneOutput> {
+        crate::extract::collect_output_until_exit_starting_at(self, start, max_bytes).await
     }
 
     /// Subscribes to the live pane output rendered into UTF-8 lines.
@@ -240,6 +280,24 @@ impl Pane {
     /// revision.
     pub async fn snapshot(&self) -> Result<PaneSnapshot> {
         pane_snapshot(&self.transport, &self.target).await
+    }
+
+    /// Captures a fresh snapshot and searches its rendered visible text for
+    /// the first literal match.
+    ///
+    /// This is a lossy rendered-text helper built from
+    /// [`PaneSnapshot::visible_lines`]. It does not inspect raw output bytes
+    /// and does not use any daemon/core regex search surface.
+    pub async fn find_text(&self, text: impl AsRef<str>) -> Result<Option<PaneTextMatch>> {
+        crate::extract::find_text(self, text.as_ref().to_owned()).await
+    }
+
+    /// Captures a fresh snapshot and returns every literal rendered-text
+    /// match, including overlapping matches on the same visible line.
+    ///
+    /// See [`Self::find_text`] for rendered-text and coordinate semantics.
+    pub async fn find_text_all(&self, text: impl AsRef<str>) -> Result<Vec<PaneTextMatch>> {
+        crate::extract::find_text_all(self, text.as_ref().to_owned()).await
     }
 
     /// Sends literal UTF-8 text bytes to this pane through the daemon.
@@ -985,6 +1043,10 @@ fn is_already_closed_error<T: TargetSelector>(error: &RmuxError, target: &T) -> 
         } => target.matches_invalid_target(value, reason),
         _ => false,
     }
+}
+
+pub(crate) fn is_already_closed_pane_error(error: &RmuxError, target: &PaneRef) -> bool {
+    is_already_closed_error(error, target)
 }
 
 trait TargetSelector {

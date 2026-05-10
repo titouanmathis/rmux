@@ -19,7 +19,8 @@ const WAIT_FOR_BYTES_OPERATION: &str = "wait for pane output bytes";
 const WAIT_FOR_TEXT_OPERATION: &str = "wait for pane snapshot text";
 const WAIT_FOR_NEXT_BYTES_OPERATION: &str = "wait for next pane output bytes";
 const WAIT_FOR_TEXT_NEXT_OPERATION: &str = "wait for next pane output text";
-const TEXT_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const WAIT_FOR_EXIT_OPERATION: &str = "wait for pane process exit";
+pub(crate) const TEXT_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 /// A daemon-armed wait for future pane output.
 ///
@@ -162,6 +163,16 @@ pub(crate) async fn wait_for_text_next(pane: &Pane, text: String) -> Result<Arme
     .await
 }
 
+pub(crate) async fn wait_exit(pane: &Pane) -> Result<Option<crate::PaneExitState>> {
+    let timeout = resolved_wait_timeout(pane.configured_default_timeout());
+    with_wait_timeout(
+        WAIT_FOR_EXIT_OPERATION,
+        timeout,
+        wait_exit_without_timeout(pane),
+    )
+    .await
+}
+
 async fn wait_for_bytes_without_timeout(
     pane: &Pane,
     bytes: Vec<u8>,
@@ -245,7 +256,35 @@ async fn wait_for_text_without_timeout(pane: &Pane, text: String) -> Result<()> 
     }
 }
 
-async fn with_wait_timeout<F, T>(
+async fn wait_exit_without_timeout(pane: &Pane) -> Result<Option<crate::PaneExitState>> {
+    loop {
+        match pane_exit_observation(pane).await? {
+            PaneExitObservation::Running => {}
+            PaneExitObservation::Exited(exit_state) => return Ok(exit_state),
+        }
+        tokio::time::sleep(TEXT_POLL_INTERVAL).await;
+    }
+}
+
+pub(crate) async fn pane_exit_observation(pane: &Pane) -> Result<PaneExitObservation> {
+    let info = pane.info().await?;
+    let Some(pane) = info.panes.first() else {
+        return Ok(PaneExitObservation::Exited(None));
+    };
+
+    if matches!(pane.process, crate::PaneProcessState::Exited) || pane.exit_state.is_some() {
+        return Ok(PaneExitObservation::Exited(pane.exit_state.clone()));
+    }
+
+    Ok(PaneExitObservation::Running)
+}
+
+pub(crate) enum PaneExitObservation {
+    Running,
+    Exited(Option<crate::PaneExitState>),
+}
+
+pub(crate) async fn with_wait_timeout<F, T>(
     operation: &'static str,
     timeout: Option<Duration>,
     future: F,
@@ -261,11 +300,11 @@ where
     }
 }
 
-fn resolved_wait_timeout(default_timeout: Option<Duration>) -> Option<Duration> {
+pub(crate) fn resolved_wait_timeout(default_timeout: Option<Duration>) -> Option<Duration> {
     crate::bootstrap::discovery::resolve_timeout(None, default_timeout)
 }
 
-fn wait_timeout_error(operation: &'static str, timeout: Duration) -> RmuxError {
+pub(crate) fn wait_timeout_error(operation: &'static str, timeout: Duration) -> RmuxError {
     RmuxError::transport(
         operation,
         io::Error::new(

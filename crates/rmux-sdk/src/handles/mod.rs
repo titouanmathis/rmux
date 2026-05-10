@@ -11,6 +11,7 @@ pub(crate) mod session;
 mod window;
 
 pub use builder::RmuxBuilder;
+pub(crate) use pane::is_already_closed_pane_error;
 pub use pane::Pane;
 pub(crate) use rmux::connect_transport_to_endpoint;
 pub use rmux::Rmux;

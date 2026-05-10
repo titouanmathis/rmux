@@ -22,7 +22,7 @@ pub use attach::{
 pub use capabilities::{
     HandshakeRequest, HandshakeResponse, CAPABILITY_ATTACH_STREAM, CAPABILITY_CONTROL_STREAM,
     CAPABILITY_DAEMON_SHUTDOWN, CAPABILITY_DETACHED_RPC, CAPABILITY_FRAMED_ERRORS,
-    CAPABILITY_HANDSHAKE, SUPPORTED_CAPABILITIES,
+    CAPABILITY_HANDSHAKE, CAPABILITY_SDK_WAITS, SUPPORTED_CAPABILITIES,
 };
 pub use codec::{decode_frame, encode_frame, FrameDecoder, DEFAULT_MAX_FRAME_LENGTH};
 pub use control::{
@@ -42,7 +42,7 @@ pub use identity::{PaneId, SessionId, SessionName, WindowId};
 pub use request::*;
 pub use response::*;
 pub use types::*;
-pub use types::{OptionScopeSelector, PaneOutputSubscriptionId};
+pub use types::{OptionScopeSelector, PaneOutputSubscriptionId, SdkWaitId, SdkWaitOwnerId};
 
 /// Detached request/response protocol revision.
 pub const PROTOCOL_VERSION: u16 = RMUX_WIRE_VERSION as u16;

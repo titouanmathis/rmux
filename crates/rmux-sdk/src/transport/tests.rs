@@ -1,17 +1,19 @@
 use std::io;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
 use rmux_proto::{
     encode_frame, ErrorResponse, HandshakeRequest, HasSessionRequest, HasSessionResponse,
-    ListSessionsRequest, ListSessionsResponse, Request, Response, SessionName,
+    ListSessionsRequest, ListSessionsResponse, Request, Response, SdkWaitId, SessionName,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
 
-use super::{DropGuard, TransportClient};
+use super::{allocate_bounded_atomic_id, DropGuard, TransportClient};
 use crate::RmuxError;
 
 fn alpha() -> SessionName {
@@ -133,6 +135,33 @@ fn assert_unsupported_feature(result: crate::Result<Response>, expected: &str) {
         RmuxError::Unsupported { feature, .. } => assert_eq!(feature, expected),
         error => panic!("expected unsupported error, got {error:?}"),
     }
+}
+
+#[tokio::test]
+async fn sdk_wait_owner_ids_are_distinct_and_wait_ids_are_per_transport() {
+    let (first_stream, _first_peer) = tokio::io::duplex(64);
+    let (second_stream, _second_peer) = tokio::io::duplex(64);
+    let first = TransportClient::spawn(first_stream);
+    let second = TransportClient::spawn(second_stream);
+
+    assert_ne!(first.sdk_wait_owner_id(), second.sdk_wait_owner_id());
+    assert_eq!(first.allocate_sdk_wait_id(), SdkWaitId::new(1));
+    assert_eq!(first.allocate_sdk_wait_id(), SdkWaitId::new(2));
+    assert_eq!(second.allocate_sdk_wait_id(), SdkWaitId::new(1));
+}
+
+#[test]
+fn bounded_sdk_wait_id_allocator_panics_instead_of_wrapping() {
+    let counter = AtomicU64::new(2);
+
+    assert_eq!(allocate_bounded_atomic_id(&counter, 2, "exhausted"), 2);
+    assert_eq!(counter.load(Ordering::Relaxed), 3);
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        allocate_bounded_atomic_id(&counter, 2, "exhausted");
+    }));
+    assert!(result.is_err());
+    assert_eq!(counter.load(Ordering::Relaxed), 3);
 }
 
 fn spawn_request(

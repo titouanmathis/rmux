@@ -335,6 +335,13 @@ impl RequestHandler {
             Request::PaneOutputCursor(request) => HandleOutcome::response(
                 self.handle_pane_output_cursor(connection_id, request).await,
             ),
+            Request::SdkWaitForOutput(request) => HandleOutcome::response(
+                self.handle_sdk_wait_for_output(connection_id, request)
+                    .await,
+            ),
+            Request::CancelSdkWait(request) => {
+                HandleOutcome::response(self.handle_cancel_sdk_wait(request).await)
+            }
             Request::ClearHistory(request) => {
                 HandleOutcome::response(self.handle_clear_history(request).await)
             }

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ControlModeResponse, HandshakeResponse, LayoutName, RmuxError};
+use crate::{ControlModeResponse, HandshakeResponse, LayoutName, RmuxError, SdkWaitId};
 
 #[path = "response/session.rs"]
 mod session;
@@ -237,6 +237,10 @@ pub enum Response {
     PaneOutputCursor(PaneOutputCursorResponse),
     /// Lag notice for daemon-backed pane output cursor polling.
     PaneOutputLag(PaneOutputLagResponse),
+    /// Success payload for a daemon-backed SDK byte wait.
+    SdkWaitForOutput(SdkWaitForOutputResponse),
+    /// Success payload for daemon-backed SDK wait cancellation.
+    CancelSdkWait(CancelSdkWaitResponse),
 }
 
 impl Response {
@@ -327,6 +331,8 @@ impl Response {
             Self::UnsubscribePaneOutput(_) => "unsubscribe-pane-output",
             Self::PaneOutputCursor(_) => "pane-output-cursor",
             Self::PaneOutputLag(_) => "pane-output-lag",
+            Self::SdkWaitForOutput(_) => "sdk-wait-output",
+            Self::CancelSdkWait(_) => "cancel-sdk-wait",
             Self::LinkWindow(_) => "link-window",
             Self::UnlinkWindow(_) => "unlink-window",
             Self::ResolveTarget(_) => "resolve-target",
@@ -371,7 +377,9 @@ impl Response {
             Self::SubscribePaneOutput(_)
             | Self::UnsubscribePaneOutput(_)
             | Self::PaneOutputCursor(_)
-            | Self::PaneOutputLag(_) => None,
+            | Self::PaneOutputLag(_)
+            | Self::SdkWaitForOutput(_)
+            | Self::CancelSdkWait(_) => None,
             _ => None,
         }
     }
@@ -672,6 +680,34 @@ impl SourceFileResponse {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitForResponse;
 
+/// Terminal state for a daemon-backed SDK byte wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SdkWaitOutcome {
+    /// The requested byte sequence was observed.
+    Matched,
+    /// The wait was cancelled by a best-effort SDK cancel request or
+    /// connection cleanup.
+    Cancelled,
+}
+
+/// Response payload for a daemon-backed SDK byte wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SdkWaitForOutputResponse {
+    /// Wait ID that completed.
+    pub wait_id: SdkWaitId,
+    /// Terminal wait outcome.
+    pub outcome: SdkWaitOutcome,
+}
+
+/// Response payload for best-effort daemon-backed SDK wait cancellation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelSdkWaitResponse {
+    /// Wait ID named by the cancellation request.
+    pub wait_id: SdkWaitId,
+    /// Whether a live wait was removed by this request.
+    pub removed: bool,
+}
+
 /// Error response payload for detached RPC failures.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorResponse {
@@ -713,6 +749,26 @@ mod tests {
         assert_eq!(
             Response::Handshake(HandshakeResponse::current()).command_name(),
             "handshake"
+        );
+        assert_eq!(
+            Response::SdkWaitForOutput(SdkWaitForOutputResponse {
+                wait_id: SdkWaitId::new(1),
+                outcome: SdkWaitOutcome::Matched,
+            })
+            .command_name(),
+            "sdk-wait-output"
+        );
+        assert_eq!(
+            Response::CancelSdkWait(CancelSdkWaitResponse {
+                wait_id: SdkWaitId::new(1),
+                removed: false,
+            })
+            .command_name(),
+            "cancel-sdk-wait"
+        );
+        assert_eq!(
+            Response::WaitFor(WaitForResponse).command_name(),
+            "wait-for"
         );
     }
 }

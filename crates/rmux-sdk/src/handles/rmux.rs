@@ -358,6 +358,13 @@ async fn connect_transport(
     }
 }
 
+pub(crate) async fn connect_transport_to_endpoint(
+    endpoint: &RmuxEndpoint,
+    timeout: Option<Duration>,
+) -> Result<TransportClient> {
+    connect_transport(endpoint, timeout).await
+}
+
 #[cfg(windows)]
 async fn connect_transport(
     endpoint: &RmuxEndpoint,

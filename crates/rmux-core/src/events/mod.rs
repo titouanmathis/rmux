@@ -8,6 +8,8 @@ pub mod cursor;
 pub mod registry;
 /// Per-pane output ring and recent live buffer storage.
 pub mod ring;
+/// Daemon-backed SDK wait identity and cleanup registry.
+pub mod wait;
 
 pub use coalescing::{
     min_interval_for_rate, PaneSnapshotCoalescerRegistry, SnapshotCoalescer,
@@ -24,3 +26,4 @@ pub use ring::{
     OutputEvent, OutputRing, RecentOutputSnapshot, DEFAULT_OUTPUT_RING_CAPACITY,
     DEFAULT_RECENT_LIVE_BUFFER_CAPACITY,
 };
+pub use wait::{SdkWaitKey, SdkWaitRecord, SdkWaitRegistry};

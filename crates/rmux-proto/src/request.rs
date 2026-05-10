@@ -3,7 +3,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::{ControlModeRequest, HandshakeRequest, PaneTarget, SessionName, Target, WindowTarget};
+use crate::{
+    ControlModeRequest, HandshakeRequest, PaneTarget, SdkWaitId, SdkWaitOwnerId, SessionName,
+    Target, WindowTarget,
+};
 
 #[path = "request/show.rs"]
 mod show;
@@ -286,6 +289,10 @@ pub enum Request {
     UnsubscribePaneOutput(UnsubscribePaneOutputRequest),
     /// Internal daemon-backed pane output cursor polling endpoint.
     PaneOutputCursor(PaneOutputCursorRequest),
+    /// Internal daemon-backed SDK byte wait endpoint.
+    SdkWaitForOutput(SdkWaitForOutputRequest),
+    /// Internal daemon-backed SDK wait cancellation endpoint.
+    CancelSdkWait(CancelSdkWaitRequest),
 }
 
 impl Request {
@@ -343,6 +350,8 @@ impl Request {
             Self::SubscribePaneOutput(_) => "subscribe-pane-output",
             Self::UnsubscribePaneOutput(_) => "unsubscribe-pane-output",
             Self::PaneOutputCursor(_) => "pane-output-cursor",
+            Self::SdkWaitForOutput(_) => "sdk-wait-output",
+            Self::CancelSdkWait(_) => "cancel-sdk-wait",
             Self::DisplayMessage(_) => "display-message",
             Self::ResolveTarget(_) => "resolve-target",
             Self::RunShell(_) => "run-shell",
@@ -533,6 +542,35 @@ pub struct WaitForRequest {
     pub mode: WaitForMode,
 }
 
+/// Request payload for a daemon-backed SDK byte wait.
+///
+/// This is intentionally distinct from tmux-compatible [`WaitForRequest`].
+/// SDK waits are pane-output waits with typed IDs used only for cancellation
+/// and teardown bookkeeping; they never signal or lock tmux `wait-for`
+/// channels.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SdkWaitForOutputRequest {
+    /// Opaque SDK transport owner for this wait.
+    pub owner_id: SdkWaitOwnerId,
+    /// Wait ID allocated by the SDK under `owner_id`.
+    pub wait_id: SdkWaitId,
+    /// Pane whose raw output stream is observed.
+    pub target: PaneTarget,
+    /// Raw byte sequence to search for in pane output.
+    pub bytes: Vec<u8>,
+    /// Cursor position used when arming the wait.
+    pub start: PaneOutputSubscriptionStart,
+}
+
+/// Request payload for best-effort cancellation of a daemon-backed SDK wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelSdkWaitRequest {
+    /// Opaque SDK transport owner for the wait being cancelled.
+    pub owner_id: SdkWaitOwnerId,
+    /// Wait ID allocated by the SDK under `owner_id`.
+    pub wait_id: SdkWaitId,
+}
+
 /// Request payload for `list-panes`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListPanesRequest {
@@ -686,6 +724,33 @@ mod tests {
         assert_eq!(
             Request::Handshake(HandshakeRequest::current()).command_name(),
             "handshake"
+        );
+        assert_eq!(
+            Request::SdkWaitForOutput(SdkWaitForOutputRequest {
+                owner_id: SdkWaitOwnerId::new(1),
+                wait_id: SdkWaitId::new(1),
+                target: pane(),
+                bytes: b"ready".to_vec(),
+                start: PaneOutputSubscriptionStart::Now,
+            })
+            .command_name(),
+            "sdk-wait-output"
+        );
+        assert_eq!(
+            Request::CancelSdkWait(CancelSdkWaitRequest {
+                owner_id: SdkWaitOwnerId::new(1),
+                wait_id: SdkWaitId::new(1),
+            })
+            .command_name(),
+            "cancel-sdk-wait"
+        );
+        assert_eq!(
+            Request::WaitFor(WaitForRequest {
+                channel: "ready".to_owned(),
+                mode: WaitForMode::Wait,
+            })
+            .command_name(),
+            "wait-for"
         );
     }
 }

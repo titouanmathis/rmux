@@ -54,6 +54,8 @@ mod session_support;
 mod subscription_support;
 #[path = "handler_targets.rs"]
 mod target_support;
+#[path = "handler_waits.rs"]
+mod wait_support;
 #[path = "handler_window.rs"]
 mod window_support;
 use crate::pane_terminals::HandlerState;
@@ -86,6 +88,7 @@ pub(in crate::handler) use target_support::{
     resolve_existing_session_target, resolve_session_lookup, target_for_request_response,
     target_for_scope_selector, target_to_scope, SessionLookup,
 };
+use wait_support::SdkWaitState;
 
 /// Default detached session size used when `new-session` omits `-x` and `-y`.
 ///
@@ -111,6 +114,7 @@ pub(crate) struct RequestHandler {
     config_loading_depth: Arc<AtomicUsize>,
     next_connection_id: Arc<AtomicU64>,
     subscriptions: Arc<StdMutex<OutputSubscriptionState>>,
+    sdk_waits: Arc<StdMutex<SdkWaitState>>,
     pane_snapshot_coalescers: Arc<StdMutex<PaneSnapshotCoalescerRegistry>>,
     #[cfg(test)]
     cleanup_on_drop: bool,
@@ -136,6 +140,7 @@ impl Clone for RequestHandler {
             config_loading_depth: self.config_loading_depth.clone(),
             next_connection_id: self.next_connection_id.clone(),
             subscriptions: self.subscriptions.clone(),
+            sdk_waits: self.sdk_waits.clone(),
             pane_snapshot_coalescers: self.pane_snapshot_coalescers.clone(),
             #[cfg(test)]
             cleanup_on_drop: false,
@@ -162,6 +167,7 @@ pub(crate) struct WeakRequestHandler {
     config_loading_depth: Weak<AtomicUsize>,
     next_connection_id: Weak<AtomicU64>,
     subscriptions: Weak<StdMutex<OutputSubscriptionState>>,
+    sdk_waits: Weak<StdMutex<SdkWaitState>>,
     pane_snapshot_coalescers: Weak<StdMutex<PaneSnapshotCoalescerRegistry>>,
     #[cfg(test)]
     paste_buffer_delete_pause: Weak<StdMutex<Option<Arc<PasteBufferDeletePause>>>>,
@@ -185,6 +191,7 @@ impl WeakRequestHandler {
             config_loading_depth: self.config_loading_depth.upgrade()?,
             next_connection_id: self.next_connection_id.upgrade()?,
             subscriptions: self.subscriptions.upgrade()?,
+            sdk_waits: self.sdk_waits.upgrade()?,
             pane_snapshot_coalescers: self.pane_snapshot_coalescers.upgrade()?,
             #[cfg(test)]
             cleanup_on_drop: false,
@@ -276,6 +283,7 @@ impl RequestHandler {
             subscriptions: Arc::new(StdMutex::new(OutputSubscriptionState::new(
                 subscription_limits,
             ))),
+            sdk_waits: Arc::new(StdMutex::new(SdkWaitState::default())),
             pane_snapshot_coalescers: Arc::new(StdMutex::new(
                 PaneSnapshotCoalescerRegistry::with_default_rate(),
             )),
@@ -303,6 +311,7 @@ impl RequestHandler {
             config_loading_depth: Arc::downgrade(&self.config_loading_depth),
             next_connection_id: Arc::downgrade(&self.next_connection_id),
             subscriptions: Arc::downgrade(&self.subscriptions),
+            sdk_waits: Arc::downgrade(&self.sdk_waits),
             pane_snapshot_coalescers: Arc::downgrade(&self.pane_snapshot_coalescers),
             #[cfg(test)]
             paste_buffer_delete_pause: Arc::downgrade(&self.paste_buffer_delete_pause),

@@ -16,6 +16,8 @@ pub const CAPABILITY_ATTACH_STREAM: &str = "stream.attach";
 pub const CAPABILITY_CONTROL_STREAM: &str = "stream.control";
 /// Stable feature id for daemon shutdown over detached RPC.
 pub const CAPABILITY_DAEMON_SHUTDOWN: &str = "daemon.shutdown";
+/// Stable feature id for daemon-backed SDK waits and cancellation.
+pub const CAPABILITY_SDK_WAITS: &str = "sdk.waits";
 
 /// Capabilities advertised by this protocol build.
 pub const SUPPORTED_CAPABILITIES: &[&str] = &[
@@ -25,6 +27,7 @@ pub const SUPPORTED_CAPABILITIES: &[&str] = &[
     CAPABILITY_ATTACH_STREAM,
     CAPABILITY_CONTROL_STREAM,
     CAPABILITY_DAEMON_SHUTDOWN,
+    CAPABILITY_SDK_WAITS,
 ];
 
 /// Client-to-server version and capability negotiation request.

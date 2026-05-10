@@ -72,6 +72,7 @@ pub(crate) async fn serve(
                     let connection_id = handler.allocate_connection_id();
                     let result = serve_connection(stream, requester, Arc::clone(&handler), connection_id, connection_shutdown, shutdown_handle).await;
                     handler.cleanup_connection_subscriptions(connection_id).await;
+                    handler.cleanup_connection_sdk_waits(connection_id).await;
                     result
                 });
             }
@@ -247,7 +248,7 @@ fn request_cancels_on_peer_disconnect(request: &Request) -> bool {
         request,
         Request::WaitFor(wait)
             if matches!(wait.mode, WaitForMode::Wait | WaitForMode::Lock)
-    )
+    ) || matches!(request, Request::SdkWaitForOutput(_))
 }
 
 fn drain_finished_connection_tasks(tasks: &mut JoinSet<io::Result<()>>) {
@@ -573,6 +574,7 @@ mod tests {
             handler
                 .cleanup_connection_subscriptions(connection_id)
                 .await;
+            handler.cleanup_connection_sdk_waits(connection_id).await;
             result
         });
         Ok((client, shutdown_tx, task))

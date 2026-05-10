@@ -18,19 +18,20 @@ use std::path::{Path, PathBuf};
 
 use rmux_proto::{
     decode_frame, encode_frame, frame_kind_for_request, frame_kind_for_response, ledger_entry_for,
-    BindKeyRequest, CapturePaneRequest, ClientTerminalContext, ClockModeRequest, ControlMode,
-    ControlModeRequest, ControlModeResponse, DetachClientRequest, ErrorResponse, FrameDecoder,
-    FrameDirection, FrameFeature, FrameKind, FrameStatus, HandshakeRequest, HandshakeResponse,
-    HasSessionRequest, HasSessionResponse, HookLifecycle, HookName, KillServerResponse,
-    KillSessionRequest, ListBuffersRequest, NewSessionResponse, OptionName, PaneOutputCursor,
-    PaneOutputCursorRequest, PaneOutputCursorResponse, PaneOutputEvent, PaneOutputLagNotice,
-    PaneOutputLagResponse, PaneOutputSubscriptionId, PaneOutputSubscriptionStart, PaneRecentOutput,
-    PaneSnapshotCursor, PaneSnapshotResponse, PaneTarget, Request, ResolveTargetRequest,
-    ResolveTargetType, Response, RmuxError, ScopeSelector, SendKeysRequest, SendKeysResponse,
-    SessionName, SetHookRequest, SetOptionMode, SetOptionRequest, SubscribePaneOutputRequest,
-    SubscribePaneOutputResponse, TerminalSize, UnsubscribePaneOutputRequest,
-    UnsubscribePaneOutputResponse, WindowTarget, RMUX_FRAME_MAGIC, RMUX_WIRE_VERSION,
-    V1_FRAME_LEDGER,
+    BindKeyRequest, CancelSdkWaitRequest, CancelSdkWaitResponse, CapturePaneRequest,
+    ClientTerminalContext, ClockModeRequest, ControlMode, ControlModeRequest, ControlModeResponse,
+    DetachClientRequest, ErrorResponse, FrameDecoder, FrameDirection, FrameFeature, FrameKind,
+    FrameStatus, HandshakeRequest, HandshakeResponse, HasSessionRequest, HasSessionResponse,
+    HookLifecycle, HookName, KillServerResponse, KillSessionRequest, ListBuffersRequest,
+    NewSessionResponse, OptionName, PaneOutputCursor, PaneOutputCursorRequest,
+    PaneOutputCursorResponse, PaneOutputEvent, PaneOutputLagNotice, PaneOutputLagResponse,
+    PaneOutputSubscriptionId, PaneOutputSubscriptionStart, PaneRecentOutput, PaneSnapshotCursor,
+    PaneSnapshotResponse, PaneTarget, Request, ResolveTargetRequest, ResolveTargetType, Response,
+    RmuxError, ScopeSelector, SdkWaitForOutputRequest, SdkWaitForOutputResponse, SdkWaitId,
+    SdkWaitOutcome, SdkWaitOwnerId, SendKeysRequest, SendKeysResponse, SessionName, SetHookRequest,
+    SetOptionMode, SetOptionRequest, SubscribePaneOutputRequest, SubscribePaneOutputResponse,
+    TerminalSize, UnsubscribePaneOutputRequest, UnsubscribePaneOutputResponse, WindowTarget,
+    RMUX_FRAME_MAGIC, RMUX_WIRE_VERSION, V1_FRAME_LEDGER,
 };
 
 fn fixture_root() -> PathBuf {
@@ -499,6 +500,17 @@ fn cross_section_requests() -> Vec<Request> {
             subscription_id: PaneOutputSubscriptionId::new(7),
             max_events: Some(4),
         }),
+        Request::SdkWaitForOutput(SdkWaitForOutputRequest {
+            owner_id: SdkWaitOwnerId::new(3),
+            wait_id: SdkWaitId::new(4),
+            target: pane,
+            bytes: b"ready".to_vec(),
+            start: PaneOutputSubscriptionStart::Now,
+        }),
+        Request::CancelSdkWait(CancelSdkWaitRequest {
+            owner_id: SdkWaitOwnerId::new(3),
+            wait_id: SdkWaitId::new(4),
+        }),
     ]
 }
 
@@ -560,6 +572,14 @@ fn cross_section_responses() -> Vec<Response> {
                     newest_sequence: Some(12),
                 },
             },
+        }),
+        Response::SdkWaitForOutput(SdkWaitForOutputResponse {
+            wait_id: SdkWaitId::new(4),
+            outcome: SdkWaitOutcome::Matched,
+        }),
+        Response::CancelSdkWait(CancelSdkWaitResponse {
+            wait_id: SdkWaitId::new(4),
+            removed: true,
         }),
     ]
 }
@@ -682,8 +702,8 @@ fn ledger_active_size_matches_request_and_response_variant_count() {
         .iter()
         .filter(|entry| matches!(entry.status, FrameStatus::Active))
         .count();
-    // Active entries = 98 Request variants + 85 Response variants.
-    assert_eq!(active_count, 98 + 85, "active ledger size mismatch");
+    // Active entries = 100 Request variants + 87 Response variants.
+    assert_eq!(active_count, 100 + 87, "active ledger size mismatch");
 }
 
 #[test]

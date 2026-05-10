@@ -107,6 +107,8 @@ pub enum FrameFeature {
     Control,
     /// Version and capability negotiation.
     Protocol,
+    /// Daemon-backed SDK waits and cancellation.
+    SdkWaits,
     /// Error envelopes.
     Errors,
     /// Reserved for future extensions.
@@ -1053,6 +1055,24 @@ pub const V1_FRAME_LEDGER: &[FrameLedgerEntry] = &[
         None,
         "Milestone 26 pane output cursor endpoint; pinned bincode tag 97.",
     ),
+    entry(
+        c2s(98),
+        FrameDirection::ClientToServer,
+        ACTIVE,
+        "SdkWaitForOutputRequest",
+        FrameFeature::SdkWaits,
+        None,
+        "Milestone 29 daemon-backed SDK byte wait endpoint; pinned bincode tag 98.",
+    ),
+    entry(
+        c2s(99),
+        FrameDirection::ClientToServer,
+        ACTIVE,
+        "CancelSdkWaitRequest",
+        FrameFeature::SdkWaits,
+        None,
+        "Milestone 29 daemon-backed SDK wait cancellation endpoint; pinned bincode tag 99.",
+    ),
     // Reserved client→server slot. Removed values must be listed and never reused.
     entry(
         c2s(0x7FFE),
@@ -1838,6 +1858,24 @@ pub const V1_FRAME_LEDGER: &[FrameLedgerEntry] = &[
         None,
         "Milestone 26 pane output lag notice response; pinned bincode tag 84.",
     ),
+    entry(
+        s2c(85),
+        FrameDirection::ServerToClient,
+        ACTIVE,
+        "SdkWaitForOutputResponse",
+        FrameFeature::SdkWaits,
+        None,
+        "Milestone 29 daemon-backed SDK byte wait response; pinned bincode tag 85.",
+    ),
+    entry(
+        s2c(86),
+        FrameDirection::ServerToClient,
+        ACTIVE,
+        "CancelSdkWaitResponse",
+        FrameFeature::SdkWaits,
+        None,
+        "Milestone 29 daemon-backed SDK wait cancellation response; pinned bincode tag 86.",
+    ),
     // Reserved server→client slot. Removed values must be listed and never reused.
     entry(
         s2c(0x7FFE),
@@ -1965,6 +2003,8 @@ pub const fn frame_kind_for_request(request: &Request) -> FrameKind {
         Request::SubscribePaneOutput(_) => c2s(95),
         Request::UnsubscribePaneOutput(_) => c2s(96),
         Request::PaneOutputCursor(_) => c2s(97),
+        Request::SdkWaitForOutput(_) => c2s(98),
+        Request::CancelSdkWait(_) => c2s(99),
     }
 }
 
@@ -2057,6 +2097,8 @@ pub const fn frame_kind_for_response(response: &Response) -> FrameKind {
         Response::UnsubscribePaneOutput(_) => s2c(82),
         Response::PaneOutputCursor(_) => s2c(83),
         Response::PaneOutputLag(_) => s2c(84),
+        Response::SdkWaitForOutput(_) => s2c(85),
+        Response::CancelSdkWait(_) => s2c(86),
     }
 }
 

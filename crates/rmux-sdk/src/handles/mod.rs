@@ -12,6 +12,7 @@ mod window;
 
 pub use builder::RmuxBuilder;
 pub use pane::Pane;
+pub(crate) use rmux::connect_transport_to_endpoint;
 pub use rmux::Rmux;
 pub use session::Session;
 pub use window::{Window, WindowCloseOutcome, WindowPane};

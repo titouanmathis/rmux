@@ -26,6 +26,7 @@ pub mod input;
 pub mod snapshot;
 pub mod spec;
 pub mod types;
+pub mod wait;
 
 #[allow(dead_code)]
 pub(crate) mod transport;

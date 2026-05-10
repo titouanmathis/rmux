@@ -3,9 +3,10 @@
 use std::collections::VecDeque;
 use std::fmt;
 use std::io;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use rmux_proto::{encode_frame, FrameDecoder, Request, Response};
+use rmux_proto::{encode_frame, FrameDecoder, Request, Response, SdkWaitId, SdkWaitOwnerId};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 
@@ -14,6 +15,7 @@ use crate::{Result, RmuxError};
 const ACTOR_QUEUE_CAPACITY: usize = 64;
 const READ_BUFFER_SIZE: usize = 8192;
 const TRANSPORT_SHUTDOWN_OPERATION: &str = "shut down rmux SDK transport";
+static NEXT_SDK_WAIT_OWNER_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
 pub(crate) struct TransportClient {
@@ -76,6 +78,19 @@ impl TransportClient {
         }
 
         let _ = self.commands.try_send(ActorMessage::BestEffort { request });
+    }
+
+    pub(crate) fn sdk_wait_owner_id(&self) -> SdkWaitOwnerId {
+        self.state.sdk_wait_owner_id
+    }
+
+    pub(crate) fn allocate_sdk_wait_id(&self) -> SdkWaitId {
+        let id = allocate_bounded_atomic_id(
+            &self.state.next_sdk_wait_id,
+            u64::MAX,
+            "SDK wait id space exhausted for transport",
+        );
+        SdkWaitId::new(id)
     }
 
     fn closed_error(&self, operation: &str) -> RmuxError {
@@ -457,9 +472,49 @@ fn request_operation(request: &Request) -> String {
     )
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct TransportState {
     terminal_failure: Mutex<Option<TransportFailure>>,
+    sdk_wait_owner_id: SdkWaitOwnerId,
+    next_sdk_wait_id: AtomicU64,
+}
+
+impl Default for TransportState {
+    fn default() -> Self {
+        Self {
+            terminal_failure: Mutex::new(None),
+            sdk_wait_owner_id: allocate_sdk_wait_owner_id(),
+            next_sdk_wait_id: AtomicU64::new(1),
+        }
+    }
+}
+
+fn allocate_sdk_wait_owner_id() -> SdkWaitOwnerId {
+    let local_id = allocate_bounded_atomic_id(
+        &NEXT_SDK_WAIT_OWNER_ID,
+        u64::from(u32::MAX),
+        "SDK wait owner id space exhausted for process",
+    );
+    let process_id = u64::from(std::process::id());
+    SdkWaitOwnerId::new((process_id << 32) | local_id)
+}
+
+fn allocate_bounded_atomic_id(
+    counter: &AtomicU64,
+    max_inclusive: u64,
+    exhausted_message: &'static str,
+) -> u64 {
+    loop {
+        let current = counter.load(Ordering::Relaxed);
+        assert!(current <= max_inclusive, "{exhausted_message}");
+        let next = current.checked_add(1).expect(exhausted_message);
+        if counter
+            .compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+        {
+            return current;
+        }
+    }
 }
 
 impl TransportState {

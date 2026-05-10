@@ -94,6 +94,19 @@ impl Pane {
         self.default_timeout
     }
 
+    pub(crate) const fn transport(&self) -> &TransportClient {
+        &self.transport
+    }
+
+    /// Waits until the pane emits the requested raw byte sequence.
+    ///
+    /// Dropping the returned future before it completes sends a best-effort
+    /// daemon cancellation request. Drop cleanup only removes the wait record;
+    /// it never closes panes, sessions, processes, or the daemon.
+    pub async fn wait_for(&self, bytes: impl AsRef<[u8]>) -> Result<()> {
+        crate::wait::wait_for_bytes(self, bytes.as_ref().to_vec()).await
+    }
+
     /// Returns the live daemon pane identity for this slot, when it is
     /// currently listed.
     ///

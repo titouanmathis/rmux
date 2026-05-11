@@ -117,8 +117,22 @@ async fn connect_or_start_transport_for_platform(
     // budget instead of using a raw one-shot open. Reuse only the remaining
     // startup budget so connect_or_start never becomes startup timeout plus
     // another full connect timeout.
-    drop(outcome);
+    drop_windows_startup_probe_stream(outcome).await?;
     connect_transport(endpoint, startup_deadline.remaining_timeout()).await
+}
+
+#[cfg(windows)]
+async fn drop_windows_startup_probe_stream(
+    outcome: crate::bootstrap::startup_windows::StartupOutcome,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || drop(outcome))
+        .await
+        .map_err(|error| {
+            RmuxError::transport(
+                "release Windows startup probe stream",
+                io::Error::other(error.to_string()),
+            )
+        })
 }
 
 #[cfg(not(any(unix, windows)))]

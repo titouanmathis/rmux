@@ -283,6 +283,7 @@ fn is_clean_shutdown_close(error: &RmuxError) -> bool {
                 io::ErrorKind::UnexpectedEof
                     | io::ErrorKind::ConnectionReset
                     | io::ErrorKind::BrokenPipe
+                    | io::ErrorKind::NotConnected
             )
     )
 }

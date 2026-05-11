@@ -105,6 +105,25 @@ async fn shutdown_negotiates_capabilities_then_waits_for_transport_close() {
         .expect("shutdown succeeds");
 }
 
+#[test]
+fn shutdown_treats_post_ack_peer_close_states_as_clean() {
+    for kind in [
+        io::ErrorKind::UnexpectedEof,
+        io::ErrorKind::ConnectionReset,
+        io::ErrorKind::BrokenPipe,
+        io::ErrorKind::NotConnected,
+    ] {
+        let error = RmuxError::transport("test shutdown", io::Error::from(kind));
+        assert!(
+            super::is_clean_shutdown_close(&error),
+            "{kind:?} should be clean after KillServer ack"
+        );
+    }
+
+    let timeout = RmuxError::transport("test shutdown", io::Error::from(io::ErrorKind::TimedOut));
+    assert!(!super::is_clean_shutdown_close(&timeout));
+}
+
 #[tokio::test]
 async fn shutdown_propagates_daemon_transport_errors() {
     let (client_stream, mut server_stream) = tokio::io::duplex(4096);

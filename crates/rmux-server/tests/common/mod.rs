@@ -1,3 +1,4 @@
+#![cfg(unix)]
 #![allow(dead_code)]
 
 use std::collections::BTreeSet;

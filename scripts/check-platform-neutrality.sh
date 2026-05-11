@@ -50,8 +50,10 @@ scan_neutral_sources "crates/rmux-types/src crates/rmux-proto/src crates/ratatui
 scan_manifest_absence crates/rmux-sdk/Cargo.toml rmux-sdk "rmux-client rmux-core rmux-server rmux-pty"
 scan_manifest_absence crates/ratatui-rmux/Cargo.toml ratatui-rmux "rmux-client rmux-core rmux-server rmux-pty rmux-proto rmux-ipc rmux-os"
 
-if [ -x scripts/cfg-check.sh ]; then
-  scripts/cfg-check.sh
+if [ -f scripts/cfg-check.sh ]; then
+  sh scripts/cfg-check.sh
+else
+  report "scripts/cfg-check.sh is missing."
 fi
 
 if [ "$fail" -ne 0 ]; then

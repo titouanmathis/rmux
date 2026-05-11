@@ -480,8 +480,7 @@ fn copy_mode_context(
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned)
         })
-        .or_else(|| std::env::var("SHELL").ok())
-        .unwrap_or_else(|| "/bin/sh".to_owned());
+        .unwrap_or_else(process_default_shell);
     let pane_cwd = pane_profile.map(|profile| profile.cwd().to_path_buf());
     let working_directory = state
         .sessions
@@ -511,4 +510,19 @@ fn copy_mode_context(
         refresh_screen,
         mouse,
     }
+}
+
+#[cfg(unix)]
+fn process_default_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned())
+}
+
+#[cfg(windows)]
+fn process_default_shell() -> String {
+    std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_owned())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn process_default_shell() -> String {
+    "sh".to_owned()
 }

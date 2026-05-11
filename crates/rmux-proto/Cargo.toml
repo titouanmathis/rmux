@@ -9,10 +9,6 @@ publish = true
 
 [dependencies]
 bincode = "1.3.3"
-# `rmux-types` is workspace-internal and stays `publish = false`. We pin a
-# version requirement here so cargo can validate the manifest shape before
-# registry resolution; dry-run upload is blocked until a release promotes
-# `rmux-types` to publishable.
 rmux-types = { path = "../rmux-types", version = "0.0.6", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"

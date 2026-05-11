@@ -2,12 +2,15 @@
 name = "rmux-os"
 version.workspace = true
 edition.workspace = true
-publish.workspace = true
+publish = true
 license.workspace = true
 repository.workspace = true
+description = "Small OS abstraction layer used by RMUX IPC and terminal integrations."
+keywords = ["terminal", "multiplexer", "os"]
+categories = ["os", "command-line-interface"]
 
 [dependencies]
-rmux-types = { path = "../rmux-types" }
+rmux-types = { path = "../rmux-types", version = "0.0.6" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.185"

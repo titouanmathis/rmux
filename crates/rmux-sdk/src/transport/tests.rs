@@ -13,7 +13,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
 
-use super::{allocate_bounded_atomic_id, DropGuard, TransportClient};
+use super::{allocate_bounded_atomic_id, mix_sdk_wait_owner_id, DropGuard, TransportClient};
 use crate::RmuxError;
 
 fn alpha() -> SessionName {
@@ -148,6 +148,19 @@ async fn sdk_wait_owner_ids_are_distinct_and_wait_ids_are_per_transport() {
     assert_eq!(first.allocate_sdk_wait_id(), SdkWaitId::new(1));
     assert_eq!(first.allocate_sdk_wait_id(), SdkWaitId::new(2));
     assert_eq!(second.allocate_sdk_wait_id(), SdkWaitId::new(1));
+}
+
+#[test]
+fn sdk_wait_owner_ids_mix_process_seed_with_local_counter() {
+    assert_ne!(
+        mix_sdk_wait_owner_id(0x1111_2222_3333_4444, 1),
+        mix_sdk_wait_owner_id(0x5555_6666_7777_8888, 1)
+    );
+    assert_ne!(
+        mix_sdk_wait_owner_id(0x1111_2222_3333_4444, 1),
+        mix_sdk_wait_owner_id(0x1111_2222_3333_4444, 2)
+    );
+    assert_ne!(mix_sdk_wait_owner_id(0, 0), 0);
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use rmux_core::events::{OutputCursorItem, OutputGap, SdkWaitKey, SdkWaitRegistry};
@@ -12,12 +12,75 @@ use crate::pane_io::PaneOutputReceiver;
 
 use super::RequestHandler;
 
-#[derive(Debug, Default)]
+const SDK_WAIT_FINISHED_KEY_LIMIT: usize = 4096;
+const SDK_WAIT_PENDING_CANCEL_LIMIT: usize = 4096;
+
+#[derive(Debug)]
 pub(in crate::handler) struct SdkWaitState {
     registry: SdkWaitRegistry,
     cancel_senders: HashMap<SdkWaitKey, oneshot::Sender<()>>,
-    seen_waits: HashSet<SdkWaitKey>,
-    cancelled_before_register: HashSet<SdkWaitKey>,
+    finished_waits: BoundedSdkWaitKeys,
+    cancelled_before_register: BoundedSdkWaitKeys,
+}
+
+#[derive(Debug)]
+struct BoundedSdkWaitKeys {
+    keys: HashSet<SdkWaitKey>,
+    order: VecDeque<SdkWaitKey>,
+    limit: usize,
+}
+
+impl BoundedSdkWaitKeys {
+    fn new(limit: usize) -> Self {
+        Self {
+            keys: HashSet::new(),
+            order: VecDeque::new(),
+            limit,
+        }
+    }
+
+    fn insert(&mut self, key: SdkWaitKey) {
+        if !self.keys.insert(key) {
+            return;
+        }
+
+        self.order.push_back(key);
+        while self.keys.len() > self.limit {
+            let Some(expired) = self.order.pop_front() else {
+                break;
+            };
+            self.keys.remove(&expired);
+        }
+    }
+
+    fn remove(&mut self, key: &SdkWaitKey) -> bool {
+        if !self.keys.remove(key) {
+            return false;
+        }
+
+        self.order.retain(|candidate| candidate != key);
+        true
+    }
+
+    fn contains(&self, key: &SdkWaitKey) -> bool {
+        self.keys.contains(key)
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.keys.len()
+    }
+}
+
+impl Default for SdkWaitState {
+    fn default() -> Self {
+        Self {
+            registry: SdkWaitRegistry::default(),
+            cancel_senders: HashMap::new(),
+            finished_waits: BoundedSdkWaitKeys::new(SDK_WAIT_FINISHED_KEY_LIMIT),
+            cancelled_before_register: BoundedSdkWaitKeys::new(SDK_WAIT_PENDING_CANCEL_LIMIT),
+        }
+    }
 }
 
 enum SdkWaitRegistration {
@@ -33,15 +96,9 @@ impl SdkWaitState {
         wait_id: SdkWaitId,
     ) -> Result<SdkWaitRegistration, RmuxError> {
         let key = SdkWaitKey::new(owner_id, wait_id);
-        if !self.seen_waits.insert(key) {
-            return Err(RmuxError::Server(format!(
-                "SDK wait {} is already used for owner {}",
-                wait_id.as_u64(),
-                owner_id.as_u64()
-            )));
-        }
 
         if self.cancelled_before_register.remove(&key) {
+            self.remember_finished(key);
             return Ok(SdkWaitRegistration::CancelledBeforeRegistration);
         }
 
@@ -53,6 +110,7 @@ impl SdkWaitState {
             )));
         }
 
+        self.finished_waits.remove(&key);
         let (sender, receiver) = oneshot::channel();
         let previous = self.cancel_senders.insert(key, sender);
         debug_assert!(previous.is_none());
@@ -62,7 +120,11 @@ impl SdkWaitState {
     fn complete(&mut self, owner_id: SdkWaitOwnerId, wait_id: SdkWaitId) -> bool {
         let key = SdkWaitKey::new(owner_id, wait_id);
         self.cancel_senders.remove(&key);
-        self.registry.remove(owner_id, wait_id).is_some()
+        let removed = self.registry.remove(owner_id, wait_id).is_some();
+        if removed {
+            self.remember_finished(key);
+        }
+        removed
     }
 
     fn cancel(&mut self, owner_id: SdkWaitOwnerId, wait_id: SdkWaitId) -> bool {
@@ -71,7 +133,9 @@ impl SdkWaitState {
         if let Some(sender) = self.cancel_senders.remove(&key) {
             let _ = sender.send(());
         }
-        if !removed && !self.seen_waits.contains(&key) {
+        if removed {
+            self.remember_finished(key);
+        } else if !self.finished_waits.contains(&key) {
             self.cancelled_before_register.insert(key);
         }
         removed
@@ -82,7 +146,12 @@ impl SdkWaitState {
             if let Some(sender) = self.cancel_senders.remove(&record.key()) {
                 let _ = sender.send(());
             }
+            self.remember_finished(record.key());
         }
+    }
+
+    fn remember_finished(&mut self, key: SdkWaitKey) {
+        self.finished_waits.insert(key);
     }
 }
 
@@ -458,7 +527,7 @@ mod tests {
     }
 
     #[test]
-    fn sdk_wait_ids_are_one_shot_even_after_completion_or_teardown() {
+    fn sdk_wait_keys_are_reusable_after_completion_or_teardown() {
         let mut state = SdkWaitState::default();
 
         let registration = state
@@ -467,14 +536,48 @@ mod tests {
         assert!(matches!(registration, SdkWaitRegistration::Registered(_)));
         assert!(state.complete(owner(10), wait(1)));
         assert!(!state.cancel(owner(10), wait(1)));
-        assert!(state.register(44, owner(10), wait(1)).is_err());
+        assert!(matches!(
+            state
+                .register(45, owner(10), wait(1))
+                .expect("completed key can be reused by a later connection"),
+            SdkWaitRegistration::Registered(_)
+        ));
+        state.remove_connection(45);
 
         let registration = state
-            .register(44, owner(10), wait(2))
-            .expect("second id registration succeeds");
+            .register(46, owner(10), wait(1))
+            .expect("teardown also releases the key for a later connection");
         assert!(matches!(registration, SdkWaitRegistration::Registered(_)));
-        state.remove_connection(44);
-        assert!(state.register(44, owner(10), wait(2)).is_err());
+    }
+
+    #[test]
+    fn active_sdk_wait_keys_still_reject_duplicate_registration() {
+        let mut state = SdkWaitState::default();
+
+        let registration = state
+            .register(44, owner(10), wait(1))
+            .expect("first registration succeeds");
+        assert!(matches!(registration, SdkWaitRegistration::Registered(_)));
+
+        assert!(state.register(45, owner(10), wait(1)).is_err());
+    }
+
+    #[test]
+    fn completed_sdk_wait_tracking_remains_bounded() {
+        let mut state = SdkWaitState::default();
+
+        for id in 1..=(SDK_WAIT_FINISHED_KEY_LIMIT + 128) as u64 {
+            let registration = state
+                .register(id, owner(10), wait(id))
+                .expect("registration succeeds");
+            assert!(matches!(registration, SdkWaitRegistration::Registered(_)));
+            assert!(state.complete(owner(10), wait(id)));
+        }
+
+        assert!(state.registry.is_empty());
+        assert!(state.cancel_senders.is_empty());
+        assert_eq!(state.cancelled_before_register.len(), 0);
+        assert!(state.finished_waits.len() <= SDK_WAIT_FINISHED_KEY_LIMIT);
     }
 
     fn registered_receiver(registration: SdkWaitRegistration) -> oneshot::Receiver<()> {

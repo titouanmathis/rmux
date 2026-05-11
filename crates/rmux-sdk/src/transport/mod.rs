@@ -1,10 +1,13 @@
 //! Crate-private Tokio transport actor for detached SDK RPC.
 
+use std::collections::hash_map::RandomState;
 use std::collections::VecDeque;
 use std::fmt;
+use std::hash::{BuildHasher, Hasher};
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rmux_proto::{encode_frame, FrameDecoder, Request, Response, SdkWaitId, SdkWaitOwnerId};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -16,6 +19,7 @@ const ACTOR_QUEUE_CAPACITY: usize = 64;
 const READ_BUFFER_SIZE: usize = 8192;
 const TRANSPORT_SHUTDOWN_OPERATION: &str = "shut down rmux SDK transport";
 static NEXT_SDK_WAIT_OWNER_ID: AtomicU64 = AtomicU64::new(1);
+static SDK_WAIT_OWNER_PROCESS_SEED: OnceLock<u64> = OnceLock::new();
 
 #[derive(Clone)]
 pub(crate) struct TransportClient {
@@ -600,11 +604,43 @@ impl Default for TransportState {
 fn allocate_sdk_wait_owner_id() -> SdkWaitOwnerId {
     let local_id = allocate_bounded_atomic_id(
         &NEXT_SDK_WAIT_OWNER_ID,
-        u64::from(u32::MAX),
+        u64::MAX - 1,
         "SDK wait owner id space exhausted for process",
     );
-    let process_id = u64::from(std::process::id());
-    SdkWaitOwnerId::new((process_id << 32) | local_id)
+    SdkWaitOwnerId::new(mix_sdk_wait_owner_id(
+        sdk_wait_owner_process_seed(),
+        local_id,
+    ))
+}
+
+fn sdk_wait_owner_process_seed() -> u64 {
+    *SDK_WAIT_OWNER_PROCESS_SEED.get_or_init(|| {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mut hasher = RandomState::new().build_hasher();
+        hasher.write_u64(now as u64);
+        hasher.write_u64((now >> 64) as u64);
+        hasher.write_u32(std::process::id());
+        splitmix64(hasher.finish())
+    })
+}
+
+fn mix_sdk_wait_owner_id(process_seed: u64, local_id: u64) -> u64 {
+    let mixed = splitmix64(process_seed ^ local_id.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    if mixed == 0 {
+        1
+    } else {
+        mixed
+    }
+}
+
+fn splitmix64(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^ (value >> 31)
 }
 
 fn allocate_bounded_atomic_id(

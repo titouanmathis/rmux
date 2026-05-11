@@ -270,28 +270,23 @@ fn check_inventory(repo_root: &Path, inventory: &Inventory) -> Result<(), Error>
 }
 
 fn ensure_verified_reference(repo_root: &Path, feature: &Feature) -> Result<(), Error> {
-    for field in [
-        "example_rustdoc",
-        "unit_test",
-        "integration_test",
-        "smoke_acceptance",
-    ] {
-        if field_contains_existing_path(repo_root, feature.field(field)) {
+    for field in ["unit_test", "integration_test", "smoke_acceptance"] {
+        if field_contains_existing_test_path(repo_root, feature.field(field)) {
             return Ok(());
         }
     }
     Err(Error::Invalid(format!(
-        "VERIFIED feature `{}` does not cite an existing test or example path",
+        "VERIFIED feature `{}` does not cite an existing Rust test path",
         feature.field("name")
     )))
 }
 
-fn field_contains_existing_path(repo_root: &Path, value: &str) -> bool {
+fn field_contains_existing_test_path(repo_root: &Path, value: &str) -> bool {
     value
         .split(|character: char| character.is_whitespace() || matches!(character, ',' | ';'))
         .map(|token| token.trim_matches(['`', '\'', '"', '(', ')']))
         .filter(|token| !token.is_empty())
-        .any(|token| repo_root.join(token).exists())
+        .any(|token| token.ends_with(".rs") && repo_root.join(token).is_file())
 }
 
 fn ensure_deferred(feature: &Feature) -> Result<(), Error> {
@@ -426,7 +421,7 @@ features:
   - name: "Quickstart"
     api_item: "rmux_sdk::Rmux::connect_or_start"
     crate_module: "rmux-sdk::handles::rmux"
-    unit_test: "none"
+    unit_test: "crates/rmux-sdk/tests/contract.rs"
     integration_test: "none"
     smoke_acceptance: "none"
     example_rustdoc: "Cargo.toml"
@@ -443,6 +438,39 @@ features:
             &inventory,
         )
         .expect("inventory checks");
+    }
+
+    #[test]
+    fn verified_feature_requires_rust_test_reference() {
+        let text = r#"
+version: 1
+features:
+  - name: "No real test"
+    api_item: "rmux_sdk::Rmux::connect_or_start"
+    crate_module: "rmux-sdk::handles::rmux"
+    unit_test: "none"
+    integration_test: "none"
+    smoke_acceptance: "none"
+    example_rustdoc: "Cargo.toml"
+    linux: "pass"
+    macos: "skipped"
+    windows: "skipped"
+    result: "VERIFIED"
+    owner: ""
+    notes: "only cites a package file"
+"#;
+        let inventory = parse_inventory(text).expect("inventory parses");
+        let error = check_inventory(
+            Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap(),
+            &inventory,
+        )
+        .expect_err("inventory must reject a verified feature without a Rust test");
+        assert!(
+            error
+                .to_string()
+                .contains("does not cite an existing Rust test path"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

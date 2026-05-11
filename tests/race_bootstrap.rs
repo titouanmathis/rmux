@@ -22,15 +22,33 @@ use rmux_server::{DaemonConfig, ServerDaemon, ServerHandle};
 use tokio::sync::Mutex;
 
 const RACE_PARALLELISM: usize = 16;
+static NEXT_SOCKET_ID: AtomicUsize = AtomicUsize::new(0);
 
 fn unique_socket_path(label: &str) -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    let dir =
-        std::env::temp_dir().join(format!("rmux-race-{label}-{}-{nanos}", std::process::id()));
-    dir.join("default")
+    // macOS has a tighter sockaddr_un path limit than Linux, and TMPDIR can
+    // already consume most of it under /var/folders. Keep race-test endpoints
+    // intentionally short so the tests exercise startup semantics, not path
+    // length behavior.
+    let id = NEXT_SOCKET_ID.fetch_add(1, Ordering::Relaxed);
+    let label = compact_socket_label(label);
+    PathBuf::from("/tmp")
+        .join(format!("rmux-race-{label}-{}-{id}", std::process::id()))
+        .join("s")
+}
+
+fn compact_socket_label(label: &str) -> String {
+    let compact = label
+        .bytes()
+        .filter(u8::is_ascii_alphanumeric)
+        .take(8)
+        .map(char::from)
+        .collect::<String>();
+
+    if compact.is_empty() {
+        "case".to_owned()
+    } else {
+        compact
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -322,9 +340,14 @@ async fn non_socket_residue_is_refused_without_unlink() {
     fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).expect("tighten parent");
     fs::write(&socket_path, b"not a socket").expect("write regular file at socket path");
 
+    let launcher_calls = Arc::new(AtomicUsize::new(0));
+    let launcher_calls_inner = Arc::clone(&launcher_calls);
     let result = connect_or_start_with(
         &socket_path,
-        || async move { Err::<(), io::Error>(io::Error::other("never reached")) },
+        move || async move {
+            launcher_calls_inner.fetch_add(1, Ordering::SeqCst);
+            Err::<(), io::Error>(io::Error::other("never reached"))
+        },
         Duration::from_millis(50),
         Duration::from_millis(10),
     )
@@ -336,12 +359,19 @@ async fn non_socket_residue_is_refused_without_unlink() {
         }) => {
             assert_eq!(path, socket_path);
             assert!(
-                operation.contains("non-socket") || operation.contains("residue"),
-                "expected non-socket residue rejection, got operation = {operation:?}"
+                operation.contains("non-socket")
+                    || operation.contains("residue")
+                    || operation == "connect to daemon socket",
+                "expected non-socket residue rejection or platform connect refusal, got operation = {operation:?}"
             );
         }
         other => panic!("expected non-socket Filesystem rejection, got {other:?}"),
     }
+    assert_eq!(
+        launcher_calls.load(Ordering::SeqCst),
+        0,
+        "non-socket residue must fail before launching a daemon"
+    );
     assert!(
         socket_path.exists(),
         "non-socket residue must not be unlinked by startup"

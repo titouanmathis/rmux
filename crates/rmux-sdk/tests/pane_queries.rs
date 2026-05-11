@@ -144,13 +144,37 @@ async fn pane_snapshot_revision_changes_after_output_resize_clear_and_exit() -> 
     assert_eq!(after_resize.rows, resized_size.1);
     assert_ne!(after_resize.revision, after_output.revision);
 
+    let history_lines = usize::from(after_resize.rows).saturating_add(8);
+    let history_markers = (0..history_lines)
+        .map(|index| format!("rmux_sdk_pane_rev_history_{index}"))
+        .collect::<Vec<_>>();
+    let history_tail = history_markers
+        .last()
+        .expect("history marker list is non-empty")
+        .clone();
+    raw_send_keys(
+        harness.socket_path(),
+        PaneTarget::with_window(alpha.clone(), 0, 0),
+        vec![
+            format!("printf '{}\\n'", history_markers.join("\\n")),
+            "Enter".to_owned(),
+        ],
+    )
+    .await?;
+    let after_history =
+        wait_for_revision_change(&pane, after_resize.revision, &history_tail).await?;
+    assert!(
+        after_history.visible_text().contains(&history_tail),
+        "history tail must be visible before clear-history"
+    );
+
     raw_clear_history(
         harness.socket_path(),
         PaneTarget::with_window(alpha.clone(), 0, 0),
     )
     .await?;
-    let after_clear = wait_for_revision_change(&pane, after_resize.revision, "").await?;
-    assert_ne!(after_clear.revision, after_resize.revision);
+    let after_clear = wait_for_revision_change(&pane, after_history.revision, "").await?;
+    assert_ne!(after_clear.revision, after_history.revision);
 
     raw_kill_pane(
         harness.socket_path(),

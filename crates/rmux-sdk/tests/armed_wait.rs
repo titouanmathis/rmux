@@ -573,13 +573,16 @@ struct TestSocket {
 impl TestSocket {
     fn new(label: &str) -> io::Result<Self> {
         let id = UNIQUE_ID.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "rmux-sdk-armed-wait-test-{}-{label}-{id}",
+        // macOS keeps Unix socket paths under a tight sockaddr_un limit; do
+        // not inherit the long /var/folders/... TMPDIR here.
+        let root = PathBuf::from("/tmp").join(format!(
+            "rmux-aw-{}-{}-{id}",
+            compact_label(label),
             std::process::id()
         ));
         std::fs::create_dir_all(&root)?;
         Ok(Self {
-            path: root.join("daemon.sock"),
+            path: root.join("s"),
             root,
         })
     }

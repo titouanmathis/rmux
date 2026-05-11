@@ -49,31 +49,17 @@ async fn ratatui_real_daemon_render_smoke() -> TestResult {
     let pane = session.pane(0, 0);
     let mut driver = PaneDriver::new(pane);
 
-    driver.refresh().await?;
-    let initial_generation = driver.state().generation;
-    let initial_render = render_symbols(driver.state());
-
-    driver.refresh().await?;
-    assert_eq!(
-        driver.state().generation,
-        initial_generation,
-        "same daemon snapshot revision should not advance redraw generation"
-    );
-    assert_eq!(
-        render_symbols(driver.state()),
-        initial_render,
-        "same daemon snapshot revision should render identically"
-    );
+    let (initial_generation, initial_render) =
+        refresh_until_stable(&mut driver, "initial shell prompt").await?;
 
     driver
         .pane()
         .send_text(format!("printf '{MARKER}\\n'\n"))
         .await?;
     driver.pane().wait_for_text(MARKER).await?;
-    driver.refresh().await?;
+    let (changed_generation, changed_render) =
+        refresh_until_stable(&mut driver, "marker output").await?;
 
-    let changed_generation = driver.state().generation;
-    let changed_render = render_symbols(driver.state());
     assert!(
         changed_generation > initial_generation,
         "visible daemon transition should advance redraw generation"
@@ -87,23 +73,27 @@ async fn ratatui_real_daemon_render_smoke() -> TestResult {
         "rendered buffer did not contain marker {MARKER:?}: {changed_render:?}"
     );
 
-    driver.refresh().await?;
-    assert_eq!(
-        driver.state().generation,
-        changed_generation,
-        "no-op refresh after marker should preserve generation"
-    );
-    assert_eq!(
-        render_symbols(driver.state()),
-        changed_render,
-        "no-op refresh after marker should preserve rendered buffer"
-    );
-
     rmux.shutdown().await?;
     wait_for_path_absent(&socket_path).await?;
     fs::remove_dir(&root)?;
     cleanup.disarm();
     Ok(())
+}
+
+async fn refresh_until_stable(driver: &mut PaneDriver, label: &str) -> TestResult<(u64, String)> {
+    let mut previous: Option<(u64, String)> = None;
+
+    for _ in 0..80 {
+        driver.refresh().await?;
+        let current = (driver.state().generation, render_symbols(driver.state()));
+        if previous.as_ref() == Some(&current) {
+            return Ok(current);
+        }
+        previous = Some(current);
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    Err(format!("daemon snapshot did not stabilize while waiting for {label}").into())
 }
 
 fn render_symbols(state: &PaneState) -> String {

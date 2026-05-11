@@ -128,7 +128,25 @@ fn session_name(value: &str) -> SessionName {
 
 fn unique_socket_path(label: &str) -> PathBuf {
     let unique_id = UNIQUE_ID.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir()
-        .join(format!("rmux-{label}-{}-{unique_id}", std::process::id()))
-        .join("default")
+    // Keep daemon socket paths inside macOS' sockaddr_un path budget.
+    PathBuf::from("/tmp")
+        .join(format!(
+            "rmux-wfc-{}-{}-{unique_id}",
+            compact_label(label),
+            std::process::id()
+        ))
+        .join("s")
+}
+
+fn compact_label(label: &str) -> String {
+    let compact = label
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .take(12)
+        .collect::<String>();
+    if compact.is_empty() {
+        "x".to_owned()
+    } else {
+        compact
+    }
 }

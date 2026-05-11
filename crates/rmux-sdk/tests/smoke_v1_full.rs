@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use rmux_sdk::{
     bootstrap::discovery::SDK_DAEMON_BINARY_ENV, EnsureSession, EnsureSessionPolicy, PaneExitState,
-    PaneOutputChunk, PaneOutputStart, PaneOutputStream, ProcessSpec, Rmux, RmuxBuilder, RmuxError,
-    SessionName, SplitDirectionSpec,
+    PaneOutputChunk, PaneOutputStart, PaneOutputStream, PaneProcessState, ProcessSpec, Rmux,
+    RmuxBuilder, RmuxError, SessionName, SplitDirectionSpec,
 };
 use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout, Instant};
@@ -74,16 +74,25 @@ async fn ci_runner_collects_command_output_and_exit() -> TestResult {
         )
         .await?;
     let pane = session.pane(0, 0);
-    let collector_pane = pane.clone();
-    let collector = tokio::spawn(async move {
-        collector_pane
-            .collect_output_until_exit_starting_at(PaneOutputStart::Now, OUTPUT_BUDGET)
-            .await
-    });
-    sleep(Duration::from_millis(100)).await;
-    pane.send_text("printf 'hello from rmux\\n'; exit 0\n")
+    let ready_marker = "RMUX_FULL_COLLECT_READY";
+    pane.send_text(format!("printf '{ready_marker}\\n'\n"))
         .await?;
-    let collected = collector.await??;
+    pane.wait_for_text(ready_marker).await?;
+    let ready_snapshot = pane.info().await?;
+    let ready_info = ready_snapshot
+        .panes
+        .first()
+        .ok_or("collector pane should still be listed after ready marker")?;
+    assert!(
+        !matches!(ready_info.process, PaneProcessState::Exited) && ready_info.exit_state.is_none(),
+        "collector pane should still be running after ready marker: {ready_info:?}"
+    );
+
+    pane.send_text("printf 'hello from rmux\\n'; sleep 1; exit 0\n")
+        .await?;
+    let collected = pane
+        .collect_output_until_exit_starting_at(PaneOutputStart::Oldest, OUTPUT_BUDGET)
+        .await?;
 
     assert!(
         String::from_utf8_lossy(&collected.bytes).contains("hello from rmux"),

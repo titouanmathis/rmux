@@ -641,13 +641,15 @@ struct TestSocket {
 impl TestSocket {
     fn new(label: &str) -> io::Result<Self> {
         let id = UNIQUE_ID.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "rmux-sdk-extract-test-{}-{label}-{id}",
+        // Keep fake Unix sockets short enough for macOS sockaddr_un.
+        let root = PathBuf::from("/tmp").join(format!(
+            "rmux-ex-{}-{}-{id}",
+            compact_label(label),
             std::process::id()
         ));
         std::fs::create_dir_all(&root)?;
         Ok(Self {
-            path: root.join("daemon.sock"),
+            path: root.join("s"),
             root,
         })
     }
@@ -660,5 +662,18 @@ impl TestSocket {
 impl Drop for TestSocket {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+fn compact_label(label: &str) -> String {
+    let compact = label
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .take(12)
+        .collect::<String>();
+    if compact.is_empty() {
+        "x".to_owned()
+    } else {
+        compact
     }
 }

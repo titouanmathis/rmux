@@ -9,15 +9,20 @@ use std::sync::Arc;
 
 use rustix::fs::{flock, FlockOperation};
 
+static NEXT_TEST_DIR_ID: AtomicUsize = AtomicUsize::new(0);
+
 fn unique_dir(label: &str) -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    std::env::temp_dir().join(format!(
-        "rmux-startup-{label}-{}-{nanos}",
-        std::process::id()
-    ))
+    let id = NEXT_TEST_DIR_ID.fetch_add(1, Ordering::SeqCst);
+    let label: String = label
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .take(8)
+        .collect();
+    let label = if label.is_empty() { "case" } else { &label };
+
+    // macOS Unix sockets have a short sockaddr_un path budget, while TMPDIR is
+    // often a long /var/folders/... path. Keep test sockets under /tmp.
+    PathBuf::from("/tmp").join(format!("rmux-su-{label}-{}-{id}", std::process::id()))
 }
 
 #[tokio::test]

@@ -499,13 +499,15 @@ struct TestSocket {
 impl TestSocket {
     fn new(label: &str) -> io::Result<Self> {
         let id = UNIQUE_ID.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "rmux-sdk-wait-test-{}-{label}-{id}",
+        // macOS Unix socket paths must fit in sockaddr_un; avoid long TMPDIR.
+        let root = PathBuf::from("/tmp").join(format!(
+            "rmux-wt-{}-{}-{id}",
+            compact_label(label),
             std::process::id()
         ));
         std::fs::create_dir_all(&root)?;
         Ok(Self {
-            path: root.join("daemon.sock"),
+            path: root.join("s"),
             root,
         })
     }

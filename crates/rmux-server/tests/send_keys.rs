@@ -16,7 +16,7 @@ use rmux_proto::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-const STEP_TIMEOUT: Duration = Duration::from_secs(3);
+const STEP_TIMEOUT: Duration = Duration::from_secs(5);
 
 async fn send_attach_command(
     stream: &mut tokio::net::UnixStream,

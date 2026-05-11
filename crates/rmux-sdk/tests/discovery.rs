@@ -432,8 +432,10 @@ struct TestRoot {
 impl TestRoot {
     fn new(label: &str) -> Self {
         let unique = UNIQUE_ID.fetch_add(1, Ordering::Relaxed);
-        let path = env::temp_dir().join(format!(
-            "rmux-sdk-discovery-{label}-{}-{unique}",
+        // Keep Unix socket fixtures below macOS' short sockaddr_un budget.
+        let path = PathBuf::from("/tmp").join(format!(
+            "rmux-sd-{}-{}-{unique}",
+            compact_label(label),
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&path);
@@ -460,6 +462,20 @@ fn expect_unix_endpoint(endpoint: rmux_sdk::Result<RmuxEndpoint>) -> PathBuf {
     match endpoint.expect("resolve endpoint") {
         RmuxEndpoint::UnixSocket(path) => path,
         endpoint => panic!("expected Unix socket endpoint, got {endpoint:?}"),
+    }
+}
+
+#[cfg(unix)]
+fn compact_label(label: &str) -> String {
+    let compact = label
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .take(12)
+        .collect::<String>();
+    if compact.is_empty() {
+        "x".to_owned()
+    } else {
+        compact
     }
 }
 

@@ -1,13 +1,8 @@
 //! Crate-private Tokio transport actor for detached SDK RPC.
 
-use std::collections::hash_map::RandomState;
 use std::collections::VecDeque;
 use std::fmt;
-use std::hash::{BuildHasher, Hasher};
-use std::io;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
 
 use rmux_proto::{encode_frame, FrameDecoder, Request, Response, SdkWaitId, SdkWaitOwnerId};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -15,11 +10,20 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{Result, RmuxError};
 
+mod failure;
+mod pending;
+mod state;
+
+use failure::TransportFailure;
+use pending::PendingCall;
+pub(crate) use pending::PendingResponse;
+use state::TransportState;
+#[cfg(test)]
+use state::{allocate_bounded_atomic_id, mix_sdk_wait_owner_id};
+
 const ACTOR_QUEUE_CAPACITY: usize = 64;
 const READ_BUFFER_SIZE: usize = 8192;
 const TRANSPORT_SHUTDOWN_OPERATION: &str = "shut down rmux SDK transport";
-static NEXT_SDK_WAIT_OWNER_ID: AtomicU64 = AtomicU64::new(1);
-static SDK_WAIT_OWNER_PROCESS_SEED: OnceLock<u64> = OnceLock::new();
 
 #[derive(Clone)]
 pub(crate) struct TransportClient {
@@ -80,10 +84,7 @@ impl TransportClient {
             .map_err(|_| self.closed_error(&operation))?
             .map_err(|failure| failure.to_error(&operation))?;
 
-        Ok(PendingResponse {
-            operation,
-            response,
-        })
+        Ok(PendingResponse::new(operation, response))
     }
 
     pub(crate) async fn shutdown(&self) -> Result<()> {
@@ -114,16 +115,11 @@ impl TransportClient {
     }
 
     pub(crate) fn sdk_wait_owner_id(&self) -> SdkWaitOwnerId {
-        self.state.sdk_wait_owner_id
+        self.state.sdk_wait_owner_id()
     }
 
     pub(crate) fn allocate_sdk_wait_id(&self) -> SdkWaitId {
-        let id = allocate_bounded_atomic_id(
-            &self.state.next_sdk_wait_id,
-            u64::MAX,
-            "SDK wait id space exhausted for transport",
-        );
-        SdkWaitId::new(id)
+        self.state.allocate_sdk_wait_id()
     }
 
     fn closed_error(&self, operation: &str) -> RmuxError {
@@ -217,94 +213,6 @@ enum ActorEvent {
     Command(ActorMessage),
     CommandsClosed,
     Response(core::result::Result<Response, TransportFailure>),
-}
-
-pub(crate) struct PendingResponse {
-    operation: String,
-    response: oneshot::Receiver<Result<Response>>,
-}
-
-impl std::future::Future for PendingResponse {
-    type Output = Result<Response>;
-
-    fn poll(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        match std::pin::Pin::new(&mut self.response).poll(cx) {
-            std::task::Poll::Ready(Ok(result)) => std::task::Poll::Ready(result),
-            std::task::Poll::Ready(Err(_)) => std::task::Poll::Ready(Err(
-                TransportFailure::actor_closed().to_error(&self.operation),
-            )),
-            std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
-
-struct PendingCall {
-    command_name: &'static str,
-    operation: String,
-    reply: Option<oneshot::Sender<Result<Response>>>,
-}
-
-impl PendingCall {
-    fn reply(
-        command_name: &'static str,
-        operation: String,
-        reply: oneshot::Sender<Result<Response>>,
-    ) -> Self {
-        Self {
-            command_name,
-            operation,
-            reply: Some(reply),
-        }
-    }
-
-    fn discard(command_name: &'static str, operation: String) -> Self {
-        Self {
-            command_name,
-            operation,
-            reply: None,
-        }
-    }
-
-    fn validate_response(&self, response: &Response) -> core::result::Result<(), TransportFailure> {
-        if response.is_error() {
-            return Ok(());
-        }
-
-        let actual = response.command_name();
-        if self.command_name == actual {
-            return Ok(());
-        }
-
-        // The pane-output cursor endpoint is the one daemon RPC that resolves
-        // to two distinct response variants: a regular cursor batch
-        // (`pane-output-cursor`) or a lag notice (`pane-output-lag`) when the
-        // server-side receiver detected a sequence gap. Both are valid
-        // replies for the same `pane-output-cursor` request.
-        if self.command_name == "pane-output-cursor" && actual == "pane-output-lag" {
-            return Ok(());
-        }
-
-        Err(TransportFailure::mismatched_response(
-            self.command_name,
-            actual,
-        ))
-    }
-
-    fn complete(self, response: Response) {
-        if let Some(reply) = self.reply {
-            let _ = reply.send(response_to_result(response));
-        }
-    }
-
-    fn fail(self, failure: &TransportFailure) {
-        if let Some(reply) = self.reply {
-            let error = failure.to_error_for_command(&self.operation, self.command_name);
-            let _ = reply.send(Err(error));
-        }
-    }
 }
 
 async fn run_actor<S>(stream: S, commands: mpsc::Receiver<ActorMessage>, state: Arc<TransportState>)
@@ -555,13 +463,6 @@ where
     }
 }
 
-fn response_to_result(response: Response) -> Result<Response> {
-    match response {
-        Response::Error(error) => Err(error.into()),
-        response => Ok(response),
-    }
-}
-
 fn fail_all(pending: &mut VecDeque<PendingCall>, failure: &TransportFailure) {
     while let Some(call) = pending.pop_front() {
         call.fail(failure);
@@ -582,196 +483,6 @@ fn request_operation(request: &Request) -> String {
         "complete `{}` request/response exchange with rmux daemon",
         request.command_name()
     )
-}
-
-#[derive(Debug)]
-struct TransportState {
-    terminal_failure: Mutex<Option<TransportFailure>>,
-    sdk_wait_owner_id: SdkWaitOwnerId,
-    next_sdk_wait_id: AtomicU64,
-}
-
-impl Default for TransportState {
-    fn default() -> Self {
-        Self {
-            terminal_failure: Mutex::new(None),
-            sdk_wait_owner_id: allocate_sdk_wait_owner_id(),
-            next_sdk_wait_id: AtomicU64::new(1),
-        }
-    }
-}
-
-fn allocate_sdk_wait_owner_id() -> SdkWaitOwnerId {
-    let local_id = allocate_bounded_atomic_id(
-        &NEXT_SDK_WAIT_OWNER_ID,
-        u64::MAX - 1,
-        "SDK wait owner id space exhausted for process",
-    );
-    SdkWaitOwnerId::new(mix_sdk_wait_owner_id(
-        sdk_wait_owner_process_seed(),
-        local_id,
-    ))
-}
-
-fn sdk_wait_owner_process_seed() -> u64 {
-    *SDK_WAIT_OWNER_PROCESS_SEED.get_or_init(|| {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let mut hasher = RandomState::new().build_hasher();
-        hasher.write_u64(now as u64);
-        hasher.write_u64((now >> 64) as u64);
-        hasher.write_u32(std::process::id());
-        splitmix64(hasher.finish())
-    })
-}
-
-fn mix_sdk_wait_owner_id(process_seed: u64, local_id: u64) -> u64 {
-    let mixed = splitmix64(process_seed ^ local_id.wrapping_mul(0x9E37_79B9_7F4A_7C15));
-    if mixed == 0 {
-        1
-    } else {
-        mixed
-    }
-}
-
-fn splitmix64(mut value: u64) -> u64 {
-    value = value.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    value ^ (value >> 31)
-}
-
-fn allocate_bounded_atomic_id(
-    counter: &AtomicU64,
-    max_inclusive: u64,
-    exhausted_message: &'static str,
-) -> u64 {
-    loop {
-        let current = counter.load(Ordering::Relaxed);
-        assert!(current <= max_inclusive, "{exhausted_message}");
-        let next = current.checked_add(1).expect(exhausted_message);
-        if counter
-            .compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed)
-            .is_ok()
-        {
-            return current;
-        }
-    }
-}
-
-impl TransportState {
-    fn terminal_failure(&self) -> Option<TransportFailure> {
-        self.lock_terminal_failure().clone()
-    }
-
-    fn set_terminal_failure(&self, failure: TransportFailure) {
-        let mut terminal_failure = self.lock_terminal_failure();
-        if terminal_failure.is_none() {
-            *terminal_failure = Some(failure);
-        }
-    }
-
-    fn lock_terminal_failure(&self) -> std::sync::MutexGuard<'_, Option<TransportFailure>> {
-        self.terminal_failure
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-}
-
-#[derive(Clone, Debug)]
-struct TransportFailure {
-    kind: io::ErrorKind,
-    message: String,
-    protocol_error: Option<rmux_proto::RmuxError>,
-}
-
-impl TransportFailure {
-    fn io(error: io::Error) -> Self {
-        Self {
-            kind: error.kind(),
-            message: error.to_string(),
-            protocol_error: None,
-        }
-    }
-
-    fn frame(error: rmux_proto::RmuxError) -> Self {
-        let message = error.to_string();
-        Self {
-            kind: io::ErrorKind::InvalidData,
-            message,
-            protocol_error: Some(error),
-        }
-    }
-
-    fn eof() -> Self {
-        Self {
-            kind: io::ErrorKind::UnexpectedEof,
-            message: "rmux daemon closed the transport".to_owned(),
-            protocol_error: None,
-        }
-    }
-
-    fn mismatched_response(expected: &'static str, actual: &'static str) -> Self {
-        Self {
-            kind: io::ErrorKind::InvalidData,
-            message: format!(
-                "rmux daemon sent `{actual}` response for pending `{expected}` request"
-            ),
-            protocol_error: None,
-        }
-    }
-
-    fn unsolicited_response(response: &Response) -> Self {
-        Self {
-            kind: io::ErrorKind::InvalidData,
-            message: format!(
-                "rmux daemon sent unsolicited `{}` response",
-                response.command_name()
-            ),
-            protocol_error: None,
-        }
-    }
-
-    fn actor_closed() -> Self {
-        Self {
-            kind: io::ErrorKind::BrokenPipe,
-            message: "rmux transport actor is closed".to_owned(),
-            protocol_error: None,
-        }
-    }
-
-    const fn is_eof(&self) -> bool {
-        matches!(self.kind, io::ErrorKind::UnexpectedEof)
-    }
-
-    fn to_error(&self, operation: &str) -> RmuxError {
-        RmuxError::transport(operation, io::Error::new(self.kind, self.message.clone()))
-    }
-
-    fn to_error_for_command(&self, operation: &str, command_name: &'static str) -> RmuxError {
-        if command_name == "handshake" {
-            if let Some(error) = self.protocol_error.as_ref() {
-                return handshake_protocol_error(error);
-            }
-        }
-
-        self.to_error(operation)
-    }
-}
-
-fn handshake_protocol_error(error: &rmux_proto::RmuxError) -> RmuxError {
-    match error {
-        rmux_proto::RmuxError::Decode(message) => RmuxError::unsupported(
-            crate::diagnostics::FEATURE_PROTOCOL_CAPABILITIES,
-            format!(
-                "upgrade the rmux daemon to one that advertises `{}` before using SDK capability negotiation; {message}",
-                rmux_proto::CAPABILITY_HANDSHAKE
-            ),
-        ),
-        error => RmuxError::protocol(error.clone()),
-    }
 }
 
 #[cfg(test)]

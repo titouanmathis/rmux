@@ -1,11 +1,17 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://rmux.io/rmux-header-dark.svg">
-  <img src="https://rmux.io/rmux-header.svg" alt="RMUX" width="600">
-</picture>
+<a href="https://rmux.io">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://rmux.io/rmux-header-dark.svg">
+    <img src="https://rmux.io/rmux-header.svg" alt="RMUX" width="500">
+  </picture>
+</a>
 
-**A local terminal multiplexer for Rust applications, TUIs, automation, and shell workflows.**
+
+**The Rust terminal multiplexer for the agentic era: detachable, scriptable, and inspectable, with a tmux-compatible CLI, daemon-backed SDK, and native [Ratatui](https://ratatui.rs) integration.**
+
+https://rmux.io
+
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
 [![Workspace version 0.1.0](https://img.shields.io/badge/workspace-0.1.0-informational.svg)](#workspace)
@@ -16,8 +22,6 @@
 <img src="https://rmux.io/rmux-terminal-demo.gif" width="500" alt="RMUX terminal session demo" />
 
 </div>
-
-The universal Rust multiplexer for the agentic era: detachable apps, scriptable sessions, inspectable panes, a tmux-compatible CLI, a daemon-backed Rust SDK, and native Ratatui integration.
 
 
 ## What RMUX Provides

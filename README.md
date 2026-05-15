@@ -1,6 +1,6 @@
 <div align="center">
 
-# RMUX
+<img src="https://rmux.io/rmux-header.svg" alt="RMUX" width="600" />
 
 **A local terminal multiplexer for Rust applications, TUIs, automation, and shell workflows.**
 
@@ -10,7 +10,7 @@
 [![Unsafe policy](https://img.shields.io/badge/unsafe-restricted-success.svg)](#verification)
 
 <br />
-<img src="gif/rmux-terminal-demo.gif" width="800" alt="RMUX terminal session demo" />
+<img src="https://rmux.io/rmux-terminal-demo.gif" width="800" alt="RMUX terminal session demo" />
 
 </div>
 
@@ -123,6 +123,20 @@ fn render(snapshot: PaneSnapshot, area: Rect, buffer: &mut Buffer) {
     PaneWidget::new(&state).render(area, buffer);
 }
 ```
+
+## Architecture
+
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://rmux.io/rmux-architecture-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="https://rmux.io/rmux-architecture-light.png">
+  <img src="https://rmux.io/rmux-architecture-dark.png" alt="RMUX runtime architecture" width="800">
+</picture>
+
+</div>
+
+Three public surfaces — a `rmux` CLI, a `rmux-sdk` Rust crate, and a `ratatui-rmux` widget — share a single local protocol to talk to the daemon. Anything one surface can do, the others can do too.
 
 ## Workspace
 

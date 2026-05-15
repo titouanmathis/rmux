@@ -8,18 +8,12 @@
 //! inside the published `rmux` binary. The current surface is:
 //!
 //! - `help` &mdash; print top-level help and exit.
-//! - `feature-inventory` &mdash; regenerate the v1 public public overview files from their
-//!   canonical sources in [`feature_inventory`].
-//! - `feature-inventory --check` &mdash; fail if any generated public overview drifts from
-//!   the canonical source. Idempotent: running `feature-inventory` then
-//!   `feature-inventory --check` must always succeed.
-//! - `feature-inventory` &mdash; validate and render the public feature
-//!   inventory used by the v0.0.5/v1 readiness gates.
+//! - `feature-inventory` &mdash; validate and render the tracked feature
+//!   inventory.
 
 use std::env;
 use std::process::ExitCode;
 
-mod feature_inventory;
 mod feature_inventory;
 
 const HELP: &str = "\
@@ -30,8 +24,6 @@ Usage:
 
 Commands:
     --help, -h, help            Print this help text.
-    feature-inventory                      Regenerate v1 public overview files from xtask/assets/.
-    feature-inventory --check              Fail if any generated public overview drifts from canon.
     feature-inventory --check
                                 Validate docs/feature-inventory-v1.yaml.
     feature-inventory --check-file-sizes
@@ -45,7 +37,6 @@ fn main() -> ExitCode {
             print!("{HELP}");
             ExitCode::SUCCESS
         }
-        Ok(Command::Feature inventory { check }) => run_feature_inventory(check),
         Ok(Command::FeatureInventory { mode }) => run_feature_inventory(mode),
         Err(message) => {
             eprintln!("{message}");
@@ -56,32 +47,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_feature_inventory(check: bool) -> ExitCode {
-    let mode = if check {
-        feature_inventory::Mode::Check
-    } else {
-        feature_inventory::Mode::Write
-    };
-    let repo_root = feature_inventory::repo_root_from_manifest_dir();
-    match feature_inventory::run(mode, &repo_root) {
-        Ok(report) => {
-            for path in &report.changed {
-                println!("feature-inventory: wrote {}", path.display());
-            }
-            for path in &report.unchanged {
-                println!("feature-inventory: unchanged {}", path.display());
-            }
-            ExitCode::SUCCESS
-        }
-        Err(error) => {
-            eprintln!("xtask feature-inventory failed: {error}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
 fn run_feature_inventory(mode: feature_inventory::Mode) -> ExitCode {
-    let repo_root = feature_inventory::repo_root_from_manifest_dir();
+    let repo_root = repo_root_from_manifest_dir();
     match feature_inventory::run(mode, &repo_root) {
         Ok(Some(markdown)) => {
             print!("{markdown}");
@@ -98,8 +65,15 @@ fn run_feature_inventory(mode: feature_inventory::Mode) -> ExitCode {
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Help,
-    Feature inventory { check: bool },
     FeatureInventory { mode: feature_inventory::Mode },
+}
+
+fn repo_root_from_manifest_dir() -> std::path::PathBuf {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or(manifest_dir)
 }
 
 fn parse_args<I>(args: I) -> Result<Command, String>
@@ -120,18 +94,6 @@ where
                 ));
             }
             Ok(Command::Help)
-        }
-        "feature-inventory" => {
-            let mut check = false;
-            for extra in args {
-                match extra.as_str() {
-                    "--check" => check = true,
-                    other => {
-                        return Err(format!("unknown feature-inventory argument: {other}"));
-                    }
-                }
-            }
-            Ok(Command::Feature inventory { check })
         }
         "feature-inventory" => {
             let mut mode = None;
@@ -188,27 +150,6 @@ mod tests {
         assert_eq!(
             parse_args(["--help", "build"]).expect_err("extra argument errors"),
             "unexpected xtask argument after --help: build"
-        );
-    }
-
-    #[test]
-    fn feature_inventory_defaults_to_write_mode() {
-        assert_eq!(parse_args(["feature-inventory"]), Ok(Command::Feature inventory { check: false }));
-    }
-
-    #[test]
-    fn feature_inventory_check_flag_selects_check_mode() {
-        assert_eq!(
-            parse_args(["feature-inventory", "--check"]),
-            Ok(Command::Feature inventory { check: true })
-        );
-    }
-
-    #[test]
-    fn feature_inventory_rejects_unknown_argument() {
-        assert_eq!(
-            parse_args(["feature-inventory", "--bogus"]).expect_err("unknown feature-inventory flag errors"),
-            "unknown feature-inventory argument: --bogus"
         );
     }
 

@@ -54,12 +54,6 @@
 //! # }
 //! ```
 //!
-//! See the crate public overview (`crates/rmux-sdk/src/lib.rs`) for the public
-//! requirements, examples, errors, platform notes, cargo features, and
-//! license posture. The public overview is assigned by
-//! `cargo run -p xtask -- feature-inventory` and verified by
-//! `cargo run -p xtask -- feature-inventory --check`.
-
 pub mod bootstrap;
 pub mod command;
 pub mod diagnostics;
@@ -93,8 +87,8 @@ pub use events::{
 };
 pub use extract::{CollectedPaneOutput, PaneTextMatch};
 pub use handles::{
-    Pane, PaneCloseOutcome, PaneRespawnOptions, Rmux, RmuxBuilder, Session, SplitDirection,
-    Window, WindowCloseOutcome, WindowPane,
+    Pane, PaneCloseOutcome, PaneRespawnOptions, Rmux, RmuxBuilder, Session, SplitDirection, Window,
+    WindowCloseOutcome, WindowPane,
 };
 pub use info::{InfoSnapshot, PaneExitState, PaneInfo, PaneProcessState, SessionInfo, WindowInfo};
 pub use input::{

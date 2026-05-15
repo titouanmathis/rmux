@@ -373,7 +373,7 @@ fn tmux_compat_command_alias_surface_when_frozen_tmux_is_available() -> Result<(
 /// on the continuation HEAD both branches use `RmuxError::Message(...)`
 /// so the bytes match tmux exactly. `RmuxError` Display shapes in
 /// `crates/rmux-proto/src/error.rs:33-37` are unchanged - the fix lands
-/// at the construction site, per the Cluster I coverage contract.
+/// at the construction site, per the control-mode contract.
 #[test]
 fn tmux_compat_wait_for_unlock_not_locked_channel_when_frozen_tmux_is_available(
 ) -> Result<(), Box<dyn Error>> {

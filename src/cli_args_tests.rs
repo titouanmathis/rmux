@@ -22,13 +22,6 @@ fn repo_file(path: &str) -> String {
         .unwrap_or_else(|error| panic!("failed to read {path}: {error}"))
 }
 
-fn structured_section<'a>(contents: &'a str, heading: &str, next_heading: &str) -> &'a str {
-    contents
-        .split_once(heading)
-        .and_then(|(_, tail)| tail.split_once(next_heading).map(|(section, _)| section))
-        .unwrap_or_else(|| panic!("missing markdown section {heading}"))
-}
-
 fn troff_section<'a>(contents: &'a str, heading: &str, next_heading: &str) -> &'a str {
     contents
         .split_once(heading)
@@ -46,22 +39,6 @@ fn troff_literal_block(contents: &str, heading: &str, next_heading: &str) -> Vec
         .filter(|line| !line.is_empty())
         .map(ToOwned::to_owned)
         .collect()
-}
-
-fn extract_backtick_tokens(line: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut rest = line;
-
-    while let Some(start) = rest.find('`') {
-        rest = &rest[start + 1..];
-        let end = rest
-            .find('`')
-            .unwrap_or_else(|| panic!("unclosed backtick token in {line:?}"));
-        tokens.push(rest[..end].to_owned());
-        rest = &rest[end + 1..];
-    }
-
-    tokens
 }
 
 fn ledger_entry_block<'a>(contents: &'a str, id: &str) -> &'a str {

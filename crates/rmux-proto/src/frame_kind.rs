@@ -169,8 +169,7 @@ const RESERVED: FrameStatus = FrameStatus::Reserved;
 
 /// Authoritative v1 ledger.
 ///
-/// Entries are sorted by `(direction, kind)`. Adding or removing entries
-/// requires an RFC update in `spec/runtime.yaml`.
+/// Entries are sorted by `(direction, kind)`.
 pub const V1_FRAME_LEDGER: &[FrameLedgerEntry] = &[
     // ----- Client → server -----
     entry(

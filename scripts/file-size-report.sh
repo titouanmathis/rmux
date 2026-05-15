@@ -2,9 +2,9 @@
 set -eu
 
 limit="${1:-600}"
-exceptions_file="${FILE_SIZE_EXCEPTIONS:-docs/file-size-exceptions.txt}"
+exceptions_file="${FILE_SIZE_EXCEPTIONS:-}"
 
-if [ ! -f "$exceptions_file" ]; then
+if [ -n "$exceptions_file" ] && [ ! -f "$exceptions_file" ]; then
   echo "missing exceptions file: $exceptions_file" >&2
   exit 1
 fi
@@ -31,6 +31,11 @@ if [ ! -s "$tmp" ]; then
 fi
 
 sort -nr "$tmp"
+
+if [ -z "$exceptions_file" ]; then
+  echo "No exception file configured; report only."
+  exit 0
+fi
 
 missing=0
 while IFS="$(printf '\t')" read -r lines file; do

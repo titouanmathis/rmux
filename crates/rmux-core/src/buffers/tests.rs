@@ -28,7 +28,9 @@ fn set_named_buffer_creates_and_replaces() {
     store.set(Some("my-buf"), b"v1".to_vec(), 50).unwrap();
     assert_eq!(store.get("my-buf"), Some(b"v1".as_slice()));
 
-    store.set(Some("my-buf"), b"value-two".to_vec(), 50).unwrap();
+    store
+        .set(Some("my-buf"), b"value-two".to_vec(), 50)
+        .unwrap();
     assert_eq!(store.get("my-buf"), Some(b"value-two".as_slice()));
     assert_eq!(store.len(), 1);
     assert_eq!(store.stack_head(), Some("my-buf"));

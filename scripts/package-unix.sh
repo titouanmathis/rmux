@@ -197,11 +197,7 @@ rm -rf "$stage_dir"
 mkdir -p "$stage_dir/bin" "$stage_dir/docs" "$stage_dir/share/man/man1"
 
 cp "$binary" "$stage_dir/bin/rmux"
-cp public overview release notes "$stage_dir/"
 cp rmux.1 "$stage_dir/share/man/man1/rmux.1"
-for doc in diagnose.txt macos-validation.txt platform-support.txt release-packaging.txt; do
-  cp "docs/$doc" "$stage_dir/docs/$doc"
-done
 if [ -f LICENSE ]; then
   cp LICENSE "$stage_dir/LICENSE"
 elif ls LICENSE.* >/dev/null 2>&1; then

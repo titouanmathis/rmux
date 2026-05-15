@@ -1,4 +1,4 @@
-//! Feature inventory validation for the v0.0.5/v1 readiness.
+//! Feature inventory validation.
 
 use std::collections::HashMap;
 use std::fmt;

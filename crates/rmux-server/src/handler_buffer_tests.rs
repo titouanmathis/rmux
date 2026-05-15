@@ -477,7 +477,10 @@ async fn named_buffer_replacement_promotes_to_stack_head() {
 
     // Replace alpha - should become stack head again
     handler
-        .handle(Request::SetBuffer(set_buffer_request(Some("alpha"), b"value-two")))
+        .handle(Request::SetBuffer(set_buffer_request(
+            Some("alpha"),
+            b"value-two",
+        )))
         .await;
 
     let show = handler

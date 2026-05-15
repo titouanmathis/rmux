@@ -22,10 +22,7 @@ pub(crate) mod unsupported_op {
     //! The Tier-3 (`cfg(all(not(unix), not(windows)))`) call sites in `pty.rs`
     //! and `child.rs` reference these constants by name, and the
     //! platform-agnostic inventory test in this crate's `tests` module reads
-    //! the same `ALL` slice. Routing both producers and the verifier through a
-    //! single set of `&'static str`s makes the doc table in
-    //! `spec/runtime.yaml` a literal mirror of source rather than
-    //! a hand-maintained transcription.
+    //! the same `ALL` slice.
     pub(crate) const OPEN_PTY_PAIR: &str = "open pty pair";
     pub(crate) const SPAWN_PTY_CHILD: &str = "spawn pty child";
     pub(crate) const WAIT_FOR_PTY_CHILD: &str = "wait for pty child";
@@ -214,9 +211,6 @@ mod tests {
 
     #[test]
     fn pty_error_unsupported_inventory_matches_documented_count() {
-        // Pin the size of the inventory so adding a new Tier-3 operation
-        // requires updating both this crate and `spec/runtime.yaml`
-        // in the same change. The doc lists nine `PtyError::Unsupported` rows.
         assert_eq!(unsupported_op::ALL.len(), 9);
     }
 

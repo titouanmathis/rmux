@@ -18,7 +18,11 @@ use rmux_sdk::{EnsureSession, ProcessSpec, Rmux, Session, TerminalSizeSpec};
 
 #[cfg(unix)]
 fn shell_command() -> [&'static str; 3] {
-    ["bash", "-c", "printf 'BANNER\\n'; exec bash --noprofile --norc -i"]
+    [
+        "bash",
+        "-c",
+        "printf 'BANNER\\n'; exec bash --noprofile --norc -i",
+    ]
 }
 
 #[cfg(windows)]
@@ -29,8 +33,7 @@ fn shell_command() -> [&'static str; 3] {
 /// Colored prompt rmux's daemon paints in freshly-spawned panes. Painting
 /// the same prompt from the example keeps every captured frame visually
 /// identical regardless of which side spawned the shell.
-const PROMPT: &str =
-    "\\033[36muser@rmuxio\\033[0m:\\033[32m~/workspace\\033[0m$ ";
+const PROMPT: &str = "\\033[36muser@rmuxio\\033[0m:\\033[32m~/workspace\\033[0m$ ";
 
 /// Connects to (or starts) the daemon and returns a deterministic session
 /// whose pane 0 has finished spawning its shell.

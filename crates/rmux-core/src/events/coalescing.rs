@@ -401,7 +401,7 @@ mod tests {
     fn cap_holds_at_most_max_per_second_per_pane_under_dense_observations() {
         // Drive the coalescer faster than 1 kHz over a full second and
         // confirm that emissions never exceed the configured cap. This is
-        // the cap check requested by the chain coverage contract; it does not
+        // the cap check requested by the output retention contract; it does not
         // touch any tokio scheduler or attach refresh scheduler.
         let mut coalescer = SnapshotCoalescer::new(60);
         let base = Instant::now();

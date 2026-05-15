@@ -40,7 +40,10 @@ async fn split_window_before_inserts_new_pane_on_the_leading_edge() {
     let pane_0 = session.window().pane(0).expect("pane 0 exists after split");
     let pane_1 = session.window().pane(1).expect("pane 1 exists after split");
     assert_eq!(pane_0.geometry().x(), 0, "leading pane sits at x=0");
-    assert!(pane_1.geometry().x() > 0, "trailing pane sits past the divider");
+    assert!(
+        pane_1.geometry().x() > 0,
+        "trailing pane sits past the divider"
+    );
     assert_eq!(
         u32::from(pane_0.geometry().cols()) + u32::from(pane_1.geometry().cols()) + 1,
         100

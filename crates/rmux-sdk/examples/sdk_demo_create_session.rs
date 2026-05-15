@@ -29,10 +29,7 @@ async fn main() -> Result<()> {
                 .size(TerminalSizeSpec::new(80, 24))
                 .process(ProcessSpec {
                     command: Some(vec!["bash".into(), "-i".into()]),
-                    environment: Some(vec![
-                        "EDITOR=nvim".into(),
-                        "PROJECT_ROOT=/srv/app".into(),
-                    ]),
+                    environment: Some(vec!["EDITOR=nvim".into(), "PROJECT_ROOT=/srv/app".into()]),
                 }),
         )
         .await?;

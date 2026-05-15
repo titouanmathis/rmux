@@ -114,7 +114,7 @@ tar -xzf "$archive_abs" -C "$tmpdir"
 package_root="$tmpdir/${archive_name%.tar.gz}"
 [ -d "$package_root" ] || die "archive root directory is missing: ${archive_name%.tar.gz}"
 
-for required in bin/rmux public overview release notes SHA256SUMS.txt docs/artifact-metadata.json docs/diagnose.txt docs/platform-support.txt share/man/man1/rmux.1; do
+for required in bin/rmux SHA256SUMS.txt docs/artifact-metadata.json share/man/man1/rmux.1; do
   [ -e "$package_root/$required" ] || die "missing package file: $required"
 done
 [ -x "$package_root/bin/rmux" ] || die "packaged rmux is not executable"

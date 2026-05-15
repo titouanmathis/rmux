@@ -257,9 +257,7 @@ pub(in crate::handler) enum SessionSortOrder {
     Size,
 }
 
-pub(in crate::handler) fn switch_target_selector_count(
-    request: &SwitchClientExt3Request,
-) -> usize {
+pub(in crate::handler) fn switch_target_selector_count(request: &SwitchClientExt3Request) -> usize {
     usize::from(request.target.is_some())
         + usize::from(request.last_session)
         + usize::from(request.next_session)

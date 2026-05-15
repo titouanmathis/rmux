@@ -176,7 +176,11 @@ fn encode_fixture(fixture: &FullFrameFixture) -> Vec<u8> {
 
 #[test]
 fn fixture_count_is_seven() {
-    assert_eq!(fixtures().len(), 7, "Milestone 3 mandates seven v1 fixtures");
+    assert_eq!(
+        fixtures().len(),
+        7,
+        "Milestone 3 mandates seven v1 fixtures"
+    );
 }
 
 #[test]
@@ -1257,11 +1261,8 @@ fn frame_kind_helpers_match_ledger_metadata_for_every_entry() {
 
 #[test]
 fn fixture_set_kinds_match_manifest_table() {
-    // Edge case: the manifest table (`tests/wire-fixtures/v1/MANIFEST.txt`)
-    // and the spec/runtime.yaml fixture table both list explicit hex `FrameKind`
-    // values for human review. The ledger is authoritative; this test pins the
-    // exact (fixture name, kind) pairs from those tables so that documentation
-    // drift surfaces as a test failure.
+    // The ledger is authoritative; this test pins the exact fixture name and
+    // kind pairs used by the wire compatibility fixtures.
     let expected: &[(&str, u16)] = &[
         ("has_session_request", 0x0001),
         ("kill_session_request", 0x0002),

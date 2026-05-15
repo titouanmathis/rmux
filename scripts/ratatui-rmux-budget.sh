@@ -1,8 +1,7 @@
 #!/usr/bin/env sh
-# Enforce the recorded `ratatui-rmux` production source/dependency budget
-# from `spec/runtime.yaml`. The script intentionally avoids cargo so it can run
-# in stripped CI shells; the matching cargo test lives in
-# `crates/ratatui-rmux/tests/budget.rs`.
+# Enforce the `ratatui-rmux` production source/dependency budget. The script
+# intentionally avoids cargo so it can run in stripped CI shells; the matching
+# cargo test lives in `crates/ratatui-rmux/tests/budget.rs`.
 set -eu
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
@@ -10,8 +9,7 @@ crate_root="$repo_root/crates/ratatui-rmux"
 src_root="$crate_root/src"
 manifest="$crate_root/Cargo.toml"
 
-# Recorded budget. Update spec/runtime.yaml first, then mirror the new values
-# here and in crates/ratatui-rmux/tests/budget.rs.
+# Keep these values in sync with crates/ratatui-rmux/tests/budget.rs.
 expected_files="lib.rs driver.rs state.rs widget.rs theme.rs"
 max_files=5
 max_source_lines=1500

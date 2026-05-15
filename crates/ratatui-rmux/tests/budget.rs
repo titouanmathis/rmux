@@ -1,9 +1,4 @@
-//! Enforces the recorded `ratatui-rmux` production source/dependency
-//! budget from `spec/runtime.yaml`.
-//!
-//! The matching CI shell script lives at
-//! `scripts/ratatui-rmux-budget.sh`; both must be updated in lockstep
-//! with the RFC entry.
+//! Enforces the `ratatui-rmux` production source and dependency budget.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -130,9 +125,6 @@ fn enforcement_script_exists() {
 
 #[test]
 fn render_purity_test_file_exists() {
-    // The coverage contract requires render.rs to cover glyph, color, and
-    // modifier translation. The file's presence is part of the recorded
-    // budget surface; removing it would silently weaken the check.
     let tests = crate_root().join("tests");
     for required in ["render.rs", "state.rs"] {
         assert!(
@@ -144,10 +136,6 @@ fn render_purity_test_file_exists() {
 
 #[test]
 fn sync_modules_do_not_use_io_or_runtime_primitives() {
-    // The coverage contract pins `widget.rs`, `state.rs`, and `theme.rs` as
-    // the sync surface: no `async fn`, no `.await`, no tokio handles, no
-    // wall-clock reads, no threads, and no sockets. Driver-side modules
-    // are exempt because that is where the I/O contract lives.
     let src = crate_root().join("src");
     let sync_modules = ["widget.rs", "state.rs", "theme.rs"];
     let banned: &[(&str, &str)] = &[
@@ -186,35 +174,11 @@ fn sync_modules_do_not_use_io_or_runtime_primitives() {
 
 #[test]
 fn driver_is_the_only_module_with_async_surface() {
-    // Mirror of the coverage contract: the I/O boundary lives in driver.rs.
-    // If async leaks elsewhere, render purity is no longer load-bearing.
     let driver = fs::read_to_string(crate_root().join("src/driver.rs")).expect("read driver.rs");
     assert!(
         driver.contains("pub async fn refresh"),
         "driver.rs must expose `pub async fn refresh` as the sole async entry point",
     );
-}
-
-#[test]
-fn rfc_records_step_36_budget_numbers() {
-    let rfc = fs::read_to_string(repo_root().join("spec/runtime.yaml")).expect("read v1.txt");
-    let needle = "Milestone 36 records `ratatui-rmux` production source and dependency size";
-    assert!(
-        rfc.contains(needle),
-        "spec/runtime.yaml must record the Milestone 36 ratatui-rmux budget"
-    );
-    // Cross-check numeric values to guarantee the RFC and the test
-    // never drift apart silently.
-    for fragment in [
-        "at most five source files",
-        "at most 1,500 non-blank source lines",
-        "at most two direct `[dependencies]` entries",
-    ] {
-        assert!(
-            rfc.contains(fragment),
-            "spec/runtime.yaml is missing budget fragment: {fragment}"
-        );
-    }
 }
 
 fn repo_root() -> PathBuf {

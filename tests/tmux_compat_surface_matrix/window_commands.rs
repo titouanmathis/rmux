@@ -503,7 +503,7 @@ fn tmux_compat_utf8_format_with_explicit_locale_when_frozen_tmux_is_available(
         return Ok(());
     };
 
-    // Coverage contract: UTF-8/width fixtures must set LC_CTYPE explicitly
+    // control-mode contract: UTF-8/width fixtures must set LC_CTYPE explicitly
     let config = tmux_compat_config()
         .with_env("LC_CTYPE", "C.UTF-8")
         .with_env("LC_ALL", "C.UTF-8")

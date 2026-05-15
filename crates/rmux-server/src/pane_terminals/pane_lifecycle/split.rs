@@ -6,9 +6,7 @@
 
 use std::path::Path;
 
-use rmux_proto::{
-    PaneTarget, RmuxError, SplitDirection, SplitWindowResponse, SplitWindowTarget,
-};
+use rmux_proto::{PaneTarget, RmuxError, SplitDirection, SplitWindowResponse, SplitWindowTarget};
 
 use crate::pane_io::{PaneAlertCallback, PaneExitCallback};
 use crate::pane_terminal_lookup::missing_pane_terminal;
@@ -20,10 +18,10 @@ use super::super::{
     pane_terminal_geometry_for_session, session_not_found, HandlerState, PaneLifecycleSpawn,
     PaneOutputSpawn,
 };
-use super::preview::{preview_split, split_window_internal_direction, split_window_session_name};
 #[cfg(windows)]
 use super::clone_terminal_for_exit_watcher;
 use super::clone_terminal_for_output_reader;
+use super::preview::{preview_split, split_window_internal_direction, split_window_session_name};
 
 impl HandlerState {
     /// Splits the addressed pane, spawning a new pane terminal.
@@ -53,8 +51,8 @@ impl HandlerState {
         let runtime_session_name =
             self.runtime_session_name_for_window(&session_name, window_index);
         let new_pane_id = self.sessions.allocate_pane_id();
-        let (session_id, window_id, new_pane_id, new_pane_geometry, requested_cwd) =
-            self.commit_split_into_session(
+        let (session_id, window_id, new_pane_id, new_pane_geometry, requested_cwd) = self
+            .commit_split_into_session(
                 &session_name,
                 &target,
                 window_index,

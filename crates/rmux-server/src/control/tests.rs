@@ -262,7 +262,7 @@ async fn eof_after_command_block_appends_exit() {
 
 #[tokio::test]
 async fn empty_line_input_emits_bare_exit_without_begin() {
-    // Coverage Cluster H cheapest scenario: a bare `\n` as the first input
+    // Minimal control-mode scenario: a bare `\n` as the first input
     // byte must route through the in-loop empty-line branch and emit a
     // bare `%exit\n` with no preceding %begin/%end/%error guard tuple.
     let handler = Arc::new(RequestHandler::new());
@@ -340,7 +340,7 @@ async fn crlf_empty_line_also_emits_bare_exit() {
 
 #[tokio::test]
 async fn incomplete_trailing_line_is_discarded_on_eof() {
-    // Coverage contract: `extract_complete_control_lines` discards any
+    // control-mode contract: `extract_complete_control_lines` discards any
     // incomplete trailing line on EOF (tmux `evbuffer_readln` semantics).
     // The command-without-newline must not trigger a %begin, and the
     // transcript must still terminate in a bare `%exit\n`.

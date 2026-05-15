@@ -16,26 +16,6 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 static UNIQUE_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
-fn rfc_documents_exact_sdk_environment_names() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let docs_path = manifest_dir
-        .parent()
-        .and_then(Path::parent)
-        .expect("workspace root")
-        .join("spec/runtime.yaml");
-    let docs = std::fs::read_to_string(&docs_path).expect("read v1 RFC");
-
-    assert!(docs.contains(SDK_ENDPOINT_ENV));
-    assert!(docs.contains(SDK_TIMEOUT_MS_ENV));
-    assert!(docs.contains(
-        "Endpoint precedence: explicit SDK builder endpoint, `RMUX_SDK_ENDPOINT`,\n  platform default through existing RMUX IPC/OS behavior."
-    ));
-    assert!(docs.contains(
-        "Timeout precedence: per-operation override, SDK builder default,\n  `RMUX_SDK_TIMEOUT_MS`, v1 default of 5,000 milliseconds. `Duration::MAX`\n  means no timeout."
-    ));
-}
-
-#[test]
 fn timeout_resolution_uses_per_operation_builder_env_then_default() {
     let _lock = lock_env();
     let _env = EnvGuard::remove(SDK_TIMEOUT_MS_ENV);

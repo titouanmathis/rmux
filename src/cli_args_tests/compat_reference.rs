@@ -13,26 +13,6 @@ fn public_compatibility_reference_files_exist() {
 }
 
 #[test]
-fn public_spec_reference_the_compatibility_reference() {
-    let overview = repo_file("public overview");
-    let specification = repo_file("spec/specification.txt");
-    let manpage = repo_file("rmux.1");
-
-    for needle in [
-        "tests/tmux_compat_harness.rs",
-        "tests/tmux_compat_surface_matrix.rs",
-        FROZEN_TMUX_REFERENCE,
-        ERROR_EXIT_MATRIX,
-        "31d77e29b6c9fbb07d032018da78db3a8a38d979",
-    ] {
-        assert!(
-            overview.contains(needle) || specification.contains(needle) || manpage.contains(needle),
-            "expected public docs to mention {needle}"
-        );
-    }
-}
-
-#[test]
 fn frozen_reference_records_digest_and_rejects_host_tmux_as_reference() {
     let reference = repo_file(FROZEN_TMUX_REFERENCE);
 

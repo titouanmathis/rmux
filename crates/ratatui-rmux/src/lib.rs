@@ -24,10 +24,8 @@
 //! while still letting the daemon-backed driver advance state
 //! between draws.
 //!
-//! The recorded production source/dependency budget for this crate
-//! lives in `spec/runtime.yaml` and is enforced by
-//! `crates/ratatui-rmux/tests/budget.rs` plus
-//! `scripts/ratatui-rmux-budget.sh`.
+//! The production source and dependency budget for this crate is enforced by
+//! `crates/ratatui-rmux/tests/budget.rs` plus `scripts/ratatui-rmux-budget.sh`.
 //!
 //! [`Buffer`]: ratatui_core::buffer::Buffer
 //!

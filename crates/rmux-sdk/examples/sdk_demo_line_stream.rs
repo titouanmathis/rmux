@@ -20,7 +20,8 @@ async fn main() -> rmux_sdk::Result<()> {
     // example:start
     let pane = session.pane(0, 0);
     let mut lines = pane.line_stream().await?;
-    pane.send_text("printf 'one\\ntwo\\nthree\\n'; exit\n").await?;
+    pane.send_text("printf 'one\\ntwo\\nthree\\n'; exit\n")
+        .await?;
     while let Some(item) = lines.next().await? {
         if let PaneLineItem::Line { text } = item {
             println!("line: {text:?}");

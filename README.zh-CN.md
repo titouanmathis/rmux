@@ -39,7 +39,21 @@
 
 ## 安装
 
-从 crates.io 安装：
+macOS 和 Linux 预构建二进制：
+
+```sh
+curl -fsSL https://rmux.io/install.sh | sh
+```
+
+Windows PowerShell 预构建二进制：
+
+```powershell
+irm https://rmux.io/install.ps1 | iex
+```
+
+直接下载和 SHA256 校验和可在 [v0.1.1 GitHub Release](https://github.com/helvesec/rmux/releases/tag/v0.1.1) 找到。
+
+使用 Cargo 从 crates.io 安装：
 
 ```sh
 cargo install rmux --locked
@@ -231,4 +245,3 @@ RMUX 采用双许可证，可任选其一：
 
 - [MIT License](LICENSE-MIT)
 - [Apache License 2.0](LICENSE-APACHE)
-

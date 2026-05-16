@@ -39,7 +39,21 @@
 
 ## Installation
 
-Depuis crates.io :
+Binaire précompilé pour macOS et Linux :
+
+```sh
+curl -fsSL https://rmux.io/install.sh | sh
+```
+
+Binaire précompilé pour Windows PowerShell :
+
+```powershell
+irm https://rmux.io/install.ps1 | iex
+```
+
+Les téléchargements directs et checksums SHA256 sont disponibles dans la [GitHub Release v0.1.1](https://github.com/helvesec/rmux/releases/tag/v0.1.1).
+
+Depuis crates.io avec Cargo :
 
 ```sh
 cargo install rmux --locked
@@ -231,4 +245,3 @@ RMUX est distribué sous double licence, au choix :
 
 - [Licence MIT](LICENSE-MIT)
 - [Licence Apache 2.0](LICENSE-APACHE)
-

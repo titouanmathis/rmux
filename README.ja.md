@@ -39,7 +39,21 @@
 
 ## インストール
 
-crates.io から：
+macOS と Linux のビルド済みバイナリ：
+
+```sh
+curl -fsSL https://rmux.io/install.sh | sh
+```
+
+Windows PowerShell のビルド済みバイナリ：
+
+```powershell
+irm https://rmux.io/install.ps1 | iex
+```
+
+直接ダウンロードと SHA256 チェックサムは [v0.1.1 GitHub Release](https://github.com/helvesec/rmux/releases/tag/v0.1.1) で確認できます。
+
+Cargo で crates.io から：
 
 ```sh
 cargo install rmux --locked
@@ -231,4 +245,3 @@ RMUX は次のいずれかのライセンスで利用できます：
 
 - [MIT License](LICENSE-MIT)
 - [Apache License 2.0](LICENSE-APACHE)
-

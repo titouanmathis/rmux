@@ -37,7 +37,21 @@ English · [Français](README.fr.md) · [简体中文](README.zh-CN.md) · [日�
 
 ## Install
 
-From crates.io:
+Prebuilt binary for macOS and Linux:
+
+```sh
+curl -fsSL https://rmux.io/install.sh | sh
+```
+
+Prebuilt binary for Windows PowerShell:
+
+```powershell
+irm https://rmux.io/install.ps1 | iex
+```
+
+Direct downloads and SHA256 checksums are available from the [v0.1.1 GitHub Release](https://github.com/helvesec/rmux/releases/tag/v0.1.1).
+
+From crates.io with Cargo:
 
 ```sh
 cargo install rmux --locked

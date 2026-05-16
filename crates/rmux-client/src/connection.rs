@@ -20,9 +20,12 @@ use rmux_proto::{
 
 /// Read buffer size for blocking socket reads.
 const READ_BUFFER_SIZE: usize = 8192;
-/// Default timeout for detached connects, request writes, and ordinary response
-/// reads.
-const SOCKET_IO_TIMEOUT: Duration = Duration::from_secs(5);
+/// Default timeout for establishing detached RPC connections.
+const SOCKET_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Default timeout for writing detached RPC requests.
+const SOCKET_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Default timeout for ordinary detached RPC response reads.
+const SOCKET_RESPONSE_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[cfg(all(test, unix))]
 const FALLBACK_SOCKET_ROOT: &str = "/tmp";
@@ -77,14 +80,18 @@ pub enum ConnectResult {
 pub fn connect_or_absent(socket_path: &Path) -> Result<ConnectResult, ClientError> {
     connect_or_absent_with_timeout_using(
         socket_path,
-        SOCKET_IO_TIMEOUT,
+        SOCKET_CONNECT_TIMEOUT,
         connect_stream_with_timeout,
     )
 }
 
 /// Connects to the RMUX server, returning an error if the server is absent.
 pub fn connect(socket_path: &Path) -> Result<Connection, ClientError> {
-    connect_with_timeout_using(socket_path, SOCKET_IO_TIMEOUT, connect_stream_with_timeout)
+    connect_with_timeout_using(
+        socket_path,
+        SOCKET_CONNECT_TIMEOUT,
+        connect_stream_with_timeout,
+    )
 }
 
 /// A blocking connection to the RMUX server that exchanges typed frames.
@@ -170,8 +177,8 @@ impl ControlModeUpgrade {
 
 impl Connection {
     pub(crate) fn new(stream: BlockingLocalStream) -> Result<Self, ClientError> {
-        set_read_timeout(&stream, Some(SOCKET_IO_TIMEOUT)).map_err(ClientError::Io)?;
-        set_write_timeout(&stream, Some(SOCKET_IO_TIMEOUT)).map_err(ClientError::Io)?;
+        set_read_timeout(&stream, Some(SOCKET_RESPONSE_TIMEOUT)).map_err(ClientError::Io)?;
+        set_write_timeout(&stream, Some(SOCKET_WRITE_TIMEOUT)).map_err(ClientError::Io)?;
 
         Ok(Self {
             stream,

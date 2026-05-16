@@ -80,6 +80,25 @@ fn respawn_probe_command(output: &Path) -> String {
     ))
 }
 
+#[cfg(windows)]
+fn expected_spawn_cwd(path: &Path) -> String {
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let rendered = canonical.display().to_string();
+    if let Some(rest) = rendered.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else {
+        rendered
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&rendered)
+            .to_owned()
+    }
+}
+
+#[cfg(unix)]
+fn expected_spawn_cwd(path: &Path) -> String {
+    path.display().to_string()
+}
+
 async fn create_session(handler: &RequestHandler, session_name: &SessionName) {
     let created = handler
         .handle(Request::NewSession(NewSessionRequest {
@@ -791,7 +810,8 @@ async fn respawn_pane_with_kill_flag_applies_directory_environment_and_command()
             target: PaneTarget::with_window(alpha, 0, 0),
         })
     );
-    wait_for_file_contents(&output, &format!("{}:ready", cwd.display())).await;
+    let expected_cwd = expected_spawn_cwd(&cwd);
+    wait_for_file_contents(&output, &format!("{expected_cwd}:ready")).await;
     let _ = fs::remove_file(output);
     let _ = fs::remove_dir_all(cwd);
 }

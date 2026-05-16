@@ -178,23 +178,13 @@ async fn attach_session_render_frame_positions_cursor_at_active_pane_cursor() {
     let handler = RequestHandler::new();
     let alpha = session_name("alpha");
 
-    assert!(matches!(
-        handler
-            .handle(Request::NewSession(NewSessionRequest {
-                session_name: alpha.clone(),
-                detached: true,
-                size: Some(TerminalSize { cols: 80, rows: 24 }),
-                environment: None,
-            }))
-            .await,
-        Response::NewSession(_)
-    ));
+    create_quiet_session(&handler, &alpha).await;
 
     replace_transcript_contents(
         &handler,
         &PaneTarget::with_window(alpha.clone(), 0, 0),
         TerminalSize { cols: 80, rows: 23 },
-        b"PROMPT> ",
+        b"PROMPT> \x1b[1;9H",
     )
     .await;
 

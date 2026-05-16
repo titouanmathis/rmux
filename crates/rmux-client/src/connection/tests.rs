@@ -371,11 +371,11 @@ fn connection_new_applies_socket_timeouts() {
 
     assert_eq!(
         connection.stream.read_timeout().expect("read timeout"),
-        Some(super::SOCKET_IO_TIMEOUT)
+        Some(super::SOCKET_RESPONSE_TIMEOUT)
     );
     assert_eq!(
         connection.stream.write_timeout().expect("write timeout"),
-        Some(super::SOCKET_IO_TIMEOUT)
+        Some(super::SOCKET_WRITE_TIMEOUT)
     );
 }
 

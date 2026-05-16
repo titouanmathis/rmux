@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - "ci/**"
   workflow_dispatch:
     inputs:
       windows_runtime_smoke:
@@ -14,14 +15,15 @@ on:
         type: boolean
 
 env:
+  CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
   RUSTDOCFLAGS: -D warnings
   TMPDIR: /tmp
   RMUX_TMPDIR: /tmp
 
 jobs:
-  linux-native:
-    name: Linux native build, lint, test, and gates
+  linux-quality:
+    name: Linux format, lint, and docs
     runs-on: ubuntu-latest
     env:
       RUST_MIN_STACK: "8388608"
@@ -31,6 +33,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Fetch locked dependencies
         run: cargo fetch --locked
@@ -44,13 +58,81 @@ jobs:
       - name: rustdoc with warnings denied
         run: cargo doc --workspace --locked --no-deps
 
+  linux-build:
+    name: Linux workspace build
+    runs-on: ubuntu-latest
+    env:
+      RUST_MIN_STACK: "8388608"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+
       - name: cargo build
         run: cargo build --workspace --locked
 
+  linux-tests:
+    name: Linux tests (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: core
+            packages: -p rmux-types -p rmux-os -p rmux-proto -p rmux-ipc -p rmux-core -p rmux-client -p rmux-render-core
+          - group: pty-sdk
+            packages: -p rmux-pty -p rmux-sdk
+          - group: server
+            packages: -p rmux-server
+          - group: app-ui
+            packages: -p rmux -p ratatui-rmux -p xtask
+    env:
+      RUST_MIN_STACK: "8388608"
+      RUST_TEST_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ matrix.group }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ matrix.group }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+
       - name: cargo test
-        env:
-          RUST_TEST_THREADS: "1"
-        run: cargo test --workspace --locked
+        run: cargo test --locked --no-fail-fast ${{ matrix.packages }}
+
+  linux-source-gates:
+    name: Linux source boundary gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: No network scoped runtime source scan
         run: scripts/no-network-in-runtime.sh
@@ -58,19 +140,132 @@ jobs:
       - name: Platform neutrality source scan
         run: scripts/check-platform-neutrality.sh
 
+  linux-sdk-smoke:
+    name: Linux SDK v1 daemon smoke
+    runs-on: ubuntu-latest
+    env:
+      RUST_MIN_STACK: "8388608"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-
+
       - name: SDK v1 daemon smoke
         run: scripts/smoke-sdk-v1.sh
+
+  linux-perf-smoke:
+    name: Linux non-final performance smoke
+    runs-on: ubuntu-latest
+    env:
+      RUST_MIN_STACK: "8388608"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Non-final local performance budget smoke
         run: scripts/perf-bench.sh --iterations 3 --line-count 10000 --output-dir target/perf/non-final-ci --fail-on-budget
 
+  linux-dependency-audit:
+    name: Linux dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-deny
+            ~/.cargo/git
+            ~/.cargo/registry
+          key: cargo-deny-${{ runner.os }}-${{ runner.arch }}-0.19.5-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-deny-${{ runner.os }}-${{ runner.arch }}-0.19.5-
+
       - name: Install cargo-deny
         if: hashFiles('deny.toml') != ''
-        run: cargo install cargo-deny --version 0.19.5 --locked
+        run: |
+          if ! command -v cargo-deny >/dev/null 2>&1; then
+            cargo install cargo-deny --version 0.19.5 --locked
+          fi
 
       - name: cargo deny check
         if: hashFiles('deny.toml') != ''
         run: cargo deny check
+
+  platform-runtime:
+    name: Platform build and smoke on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-15-intel
+          - macos-15
+          - windows-latest
+    env:
+      RUST_MIN_STACK: "8388608"
+      RUST_TEST_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: cargo-${{ matrix.os }}-platform-runtime-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ matrix.os }}-platform-runtime-
+
+      - name: Configure temporary paths
+        shell: bash
+        run: |
+          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "RMUX_TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+
+      - name: cargo build
+        run: cargo build --workspace --locked
+
+      - name: cargo test portable crates
+        run: cargo test --locked --no-fail-fast -p rmux-types -p rmux-os -p rmux-proto -p rmux-ipc -p rmux-core -p rmux-client
+
+      - name: rmux binary smoke
+        run: cargo run --package rmux --locked -- -V
 
   windows-cross:
     name: Cross-target Windows build check
@@ -81,6 +276,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-gnu
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install Windows GNU linker
         run: |
@@ -98,6 +305,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+            cargo-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Windows hidden daemon smoke
         run: cargo test --locked --test internal_daemon_windows -- --nocapture

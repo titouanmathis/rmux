@@ -343,6 +343,9 @@ impl Connection {
                 before,
                 environment,
                 command,
+                process_command: None,
+                start_directory: None,
+                keep_alive_on_exit: None,
             }));
         }
         self.roundtrip(&Request::SplitWindow(SplitWindowRequest {

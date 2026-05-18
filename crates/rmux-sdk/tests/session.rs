@@ -2,6 +2,8 @@
 
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -68,6 +70,56 @@ async fn create_only_builds_live_session_and_hides_process_environment() -> Test
         .contains(&name));
 
     assert!(session.kill().await?);
+    harness.finish().await
+}
+
+#[tokio::test]
+async fn ensure_session_command_preserves_legacy_and_explicit_modes_are_clear() -> TestResult {
+    let _lock = LIVE_DAEMON_LOCK.lock().await;
+    let harness = Harness::start("ensure-argv-shell").await?;
+    let rmux = harness.rmux();
+    let legacy_name = session_name("sdkensurelegacy");
+    let direct_name = session_name("sdkensureargv");
+    let shell_name = session_name("sdkensureshell");
+    let executable = write_executable_script(
+        harness.root(),
+        "ensure direct binary",
+        "#!/bin/sh\nprintf 'sdk_ensure_direct_argv\\n'; sleep 2\n",
+    )?;
+
+    let legacy = EnsureSession::named(legacy_name.clone())
+        .create_only()
+        .detached(true)
+        .command(["printf 'sdk_ensure_legacy_shell\\n'; sleep 2"])
+        .ensure(&rmux)
+        .await?;
+    legacy
+        .pane(0, 0)
+        .wait_for_text("sdk_ensure_legacy_shell")
+        .await?;
+
+    let direct = EnsureSession::named(direct_name.clone())
+        .create_only()
+        .detached(true)
+        .argv([executable.to_string_lossy().into_owned()])
+        .ensure(&rmux)
+        .await?;
+    direct
+        .pane(0, 0)
+        .wait_for_text("sdk_ensure_direct_argv")
+        .await?;
+
+    let shell = EnsureSession::named(shell_name.clone())
+        .create_only()
+        .detached(true)
+        .shell("printf 'sdk_ensure_shell\\n'; sleep 2")
+        .ensure(&rmux)
+        .await?;
+    shell.pane(0, 0).wait_for_text("sdk_ensure_shell").await?;
+
+    assert!(legacy.kill().await?);
+    assert!(direct.kill().await?);
+    assert!(shell.kill().await?);
     harness.finish().await
 }
 
@@ -241,6 +293,7 @@ fn process_related_debug_output_redacts_environment_values() {
     let secret = "PROCESS_DEBUG_SECRET=hidden";
     let process = ProcessSpec {
         command: Some(vec!["printf".to_owned(), "ok".to_owned()]),
+        process_command: None,
         environment: Some(vec![secret.to_owned()]),
     };
     assert_no_secret("process debug", &format!("{process:?}"), secret);
@@ -302,6 +355,15 @@ fn assert_no_secret(label: &str, rendered: &str, secret: &str) {
         !rendered.contains("SECRET="),
         "{label} must not render process environment bindings: {rendered}",
     );
+}
+
+fn write_executable_script(root: &Path, name: &str, body: &str) -> TestResult<PathBuf> {
+    let path = root.join(name);
+    fs::write(&path, body)?;
+    let mut permissions = fs::metadata(&path)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&path, permissions)?;
+    Ok(path)
 }
 
 async fn raw_list_session_names(socket_path: &Path) -> TestResult<Vec<SessionName>> {
@@ -416,7 +478,8 @@ impl Harness {
                 rendered.contains("connect to rmux daemon")
                     || rendered.contains("rmux daemon closed the transport")
                     || rendered.contains("rmux transport actor is closed")
-                    || rendered.contains("Connection reset by peer"),
+                    || rendered.contains("Connection reset by peer")
+                    || rendered.contains("Broken pipe"),
                 "unexpected cleanup shutdown error: {rendered}"
             );
         }

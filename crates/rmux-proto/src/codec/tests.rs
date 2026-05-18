@@ -174,6 +174,9 @@ fn every_request_variant_round_trips_through_the_frame_codec() {
             before: false,
             environment: Some(vec!["FOO=bar".to_owned()]),
             command: Some(vec!["printf done".to_owned()]),
+            process_command: None,
+            start_directory: None,
+            keep_alive_on_exit: None,
         }),
         Request::AttachSession(AttachSessionRequest {
             target: alpha.clone(),

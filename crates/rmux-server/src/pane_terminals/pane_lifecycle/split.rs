@@ -6,12 +6,15 @@
 
 use std::path::Path;
 
-use rmux_proto::{PaneTarget, RmuxError, SplitDirection, SplitWindowResponse, SplitWindowTarget};
+use rmux_proto::{
+    OptionName, PaneTarget, ProcessCommand, RmuxError, ScopeSelector, SetOptionMode,
+    SplitDirection, SplitWindowResponse, SplitWindowTarget,
+};
 
 use crate::pane_io::{PaneAlertCallback, PaneExitCallback};
 use crate::pane_terminal_lookup::missing_pane_terminal;
 use crate::pane_terminal_process::open_pane_terminal;
-use crate::terminal::TerminalProfile;
+use crate::terminal::{validate_process_command, TerminalProfile};
 
 use super::super::lifecycle_state::terminal_size_from_geometry;
 use super::super::{
@@ -36,10 +39,13 @@ impl HandlerState {
         before: bool,
         socket_path: &Path,
         environment_overrides: Option<&[String]>,
-        command: Option<&[String]>,
+        command: Option<&ProcessCommand>,
+        start_directory: Option<&Path>,
+        keep_alive_on_exit: Option<bool>,
         pane_alert_callback: Option<PaneAlertCallback>,
         pane_exit_callback: Option<PaneExitCallback>,
     ) -> Result<SplitWindowResponse, RmuxError> {
+        validate_process_command(command)?;
         let session_name = split_window_session_name(&target).clone();
         let internal_direction = split_window_internal_direction(direction);
         let previous_session = self
@@ -62,6 +68,16 @@ impl HandlerState {
                 internal_direction,
                 before,
             )?;
+        let new_target =
+            PaneTarget::with_window(session_name.clone(), window_index, new_pane_index);
+        if let Some(keep_alive) = keep_alive_on_exit {
+            self.options.set(
+                ScopeSelector::Pane(new_target.clone()),
+                OptionName::RemainOnExit,
+                if keep_alive { "on" } else { "off" }.to_owned(),
+                SetOptionMode::Replace,
+            )?;
+        }
 
         let profile = TerminalProfile::for_session(
             &self.environment,
@@ -72,7 +88,7 @@ impl HandlerState {
             true,
             environment_overrides,
             Some(new_pane_id),
-            requested_cwd.as_deref(),
+            start_directory.or(requested_cwd.as_deref()),
         )?;
         let runtime_window_name = profile.runtime_window_name(command);
         let lifecycle_cwd = profile.cwd().to_path_buf();
@@ -161,7 +177,7 @@ impl HandlerState {
             session_id,
             window_id,
             pane_id: new_pane_id,
-            command: command.map(<[String]>::to_vec),
+            command: command.map(ProcessCommand::display_command),
             working_directory: Some(lifecycle_cwd),
             private_environment: environment_overrides.map(<[String]>::to_vec),
             dimensions: terminal_size_from_geometry(new_pane_geometry),
@@ -171,9 +187,7 @@ impl HandlerState {
         self.update_pane_lifecycle_output_sequence(new_pane_id, output_sequence);
         self.sync_pane_lifecycle_dimensions_for_session(&session_name);
 
-        Ok(SplitWindowResponse {
-            pane: PaneTarget::with_window(session_name, window_index, new_pane_index),
-        })
+        Ok(SplitWindowResponse { pane: new_target })
     }
 
     /// Applies the split to the real session store and returns ids + geometry

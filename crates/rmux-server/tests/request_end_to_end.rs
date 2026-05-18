@@ -20,7 +20,7 @@ use rmux_proto::{
 use tokio::time::sleep;
 
 const COMMAND_SURFACE_COUNT: usize = 78;
-const INTERNAL_REQUEST_COMMANDS: [&str; 23] = [
+const INTERNAL_REQUEST_COMMANDS: [&str; 35] = [
     "attach-session-ext",
     "attach-session-ext2",
     "cancel-sdk-wait",
@@ -28,8 +28,18 @@ const INTERNAL_REQUEST_COMMANDS: [&str; 23] = [
     "detach-client-ext",
     "handshake",
     "new-session-ext",
+    "create-session-lease",
+    "pane-broadcast-input",
+    "pane-input",
+    "pane-kill",
+    "pane-resize",
+    "pane-respawn",
+    "pane-select",
     "pane-snapshot",
+    "pane-snapshot-ref",
     "resolve-target",
+    "release-session-lease",
+    "renew-session-lease",
     "select-custom-layout",
     "select-pane-mark",
     "select-pane-adjacent",
@@ -37,7 +47,9 @@ const INTERNAL_REQUEST_COMMANDS: [&str; 23] = [
     "send-keys-ext",
     "spread-layout",
     "sdk-wait-output",
+    "sdk-wait-for-output-ref",
     "sdk-wait-for-output",
+    "subscribe-pane-output-ref",
     "set-hook-mutation",
     "set-option-by-name",
     "split-window-ext",

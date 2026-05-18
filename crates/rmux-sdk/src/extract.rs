@@ -262,23 +262,33 @@ fn find_text_in_snapshot(snapshot: &PaneSnapshot, needle: &str) -> Vec<PaneTextM
     let mut matches = Vec::new();
     for (row, line) in lines.iter().enumerate() {
         let row = row as u16;
-        let coords = rendered_row_byte_coords(snapshot, row, line);
         for (start, end) in literal_match_ranges(line, needle) {
-            let Some(start_coord) = coords.get(start) else {
-                continue;
-            };
-            let Some(end_coord) = end.checked_sub(1).and_then(|index| coords.get(index)) else {
-                continue;
-            };
-            matches.push(PaneTextMatch::new(
-                row,
-                start_coord.start_col,
-                end_coord.end_col,
-                line[start..end].to_owned(),
-            ));
+            if let Some(text_match) =
+                text_match_for_rendered_row_range(snapshot, row, line, start, end)
+            {
+                matches.push(text_match);
+            }
         }
     }
     matches
+}
+
+pub(crate) fn text_match_for_rendered_row_range(
+    snapshot: &PaneSnapshot,
+    row: u16,
+    line: &str,
+    start: usize,
+    end: usize,
+) -> Option<PaneTextMatch> {
+    let coords = rendered_row_byte_coords(snapshot, row, line);
+    let start_coord = coords.get(start)?;
+    let end_coord = end.checked_sub(1).and_then(|index| coords.get(index))?;
+    Some(PaneTextMatch::new(
+        row,
+        start_coord.start_col,
+        end_coord.end_col,
+        line.get(start..end)?.to_owned(),
+    ))
 }
 
 #[derive(Debug, Clone, Copy)]

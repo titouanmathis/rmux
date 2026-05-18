@@ -6,11 +6,11 @@ use crate::mouse::{AttachedMouseEvent, MouseLocation};
 use rmux_core::{input::mode, key_string_lookup_string};
 use rmux_proto::{
     BindKeyRequest, CopyModeRequest, ErrorResponse, ListKeysRequest, ListPanesRequest,
-    NewSessionRequest, OptionName, PaneTarget, Request, Response, RmuxError, ScopeSelector,
-    SelectPaneRequest, SendKeysExtRequest, SendKeysRequest, SendKeysResponse, SendPrefixRequest,
-    SetOptionMode, SetOptionRequest, ShowBufferRequest, SplitDirection, SplitWindowRequest,
-    SplitWindowTarget, SwitchClientExtRequest, TerminalSize, UnbindKeyRequest, WindowTarget,
-    DEFAULT_MAX_FRAME_LENGTH,
+    NewSessionRequest, OptionName, PaneBroadcastInputRequest, PaneId, PaneTarget, PaneTargetRef,
+    Request, Response, RmuxError, ScopeSelector, SelectPaneRequest, SendKeysExtRequest,
+    SendKeysRequest, SendKeysResponse, SendPrefixRequest, SetOptionMode, SetOptionRequest,
+    ShowBufferRequest, SplitDirection, SplitWindowRequest, SplitWindowTarget,
+    SwitchClientExtRequest, TerminalSize, UnbindKeyRequest, WindowTarget, DEFAULT_MAX_FRAME_LENGTH,
 };
 use std::time::Duration;
 use tokio::sync::mpsc;

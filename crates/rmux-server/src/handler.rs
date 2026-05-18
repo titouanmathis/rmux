@@ -50,6 +50,8 @@ mod prompt_support;
 mod scripting_support;
 #[path = "handler_server_access.rs"]
 mod server_access_support;
+#[path = "handler_session/leases.rs"]
+mod session_lease_support;
 #[path = "handler_session.rs"]
 mod session_support;
 #[path = "handler_subscriptions.rs"]
@@ -86,6 +88,7 @@ pub(in crate::handler) use lifecycle_support::prepare_lifecycle_event;
 pub(crate) use lifecycle_support::QueuedLifecycleEvent;
 use option_support::option_value_u32;
 use pane_support::PaneSnapshotRevisionRegistry;
+use session_lease_support::SessionLeaseStore;
 use subscription_support::OutputSubscriptionState;
 pub(in crate::handler) use target_support::{
     active_session_target, active_window_target, fallback_current_target,
@@ -120,6 +123,8 @@ pub(crate) struct RequestHandler {
     subscriptions: Arc<StdMutex<OutputSubscriptionState>>,
     retained_exited_outputs: Arc<StdMutex<RetainedExitedPaneOutputs>>,
     sdk_waits: Arc<StdMutex<SdkWaitState>>,
+    session_leases: Arc<StdMutex<SessionLeaseStore>>,
+    session_lease_janitor_started: Arc<AtomicBool>,
     pane_snapshot_coalescers: Arc<StdMutex<PaneSnapshotCoalescerRegistry>>,
     pane_snapshot_revisions: Arc<StdMutex<PaneSnapshotRevisionRegistry>>,
     #[cfg(test)]
@@ -148,6 +153,8 @@ impl Clone for RequestHandler {
             subscriptions: self.subscriptions.clone(),
             retained_exited_outputs: self.retained_exited_outputs.clone(),
             sdk_waits: self.sdk_waits.clone(),
+            session_leases: self.session_leases.clone(),
+            session_lease_janitor_started: self.session_lease_janitor_started.clone(),
             pane_snapshot_coalescers: self.pane_snapshot_coalescers.clone(),
             pane_snapshot_revisions: self.pane_snapshot_revisions.clone(),
             #[cfg(test)]
@@ -177,6 +184,8 @@ pub(crate) struct WeakRequestHandler {
     subscriptions: Weak<StdMutex<OutputSubscriptionState>>,
     retained_exited_outputs: Weak<StdMutex<RetainedExitedPaneOutputs>>,
     sdk_waits: Weak<StdMutex<SdkWaitState>>,
+    session_leases: Weak<StdMutex<SessionLeaseStore>>,
+    session_lease_janitor_started: Weak<AtomicBool>,
     pane_snapshot_coalescers: Weak<StdMutex<PaneSnapshotCoalescerRegistry>>,
     pane_snapshot_revisions: Weak<StdMutex<PaneSnapshotRevisionRegistry>>,
     #[cfg(test)]
@@ -203,6 +212,8 @@ impl WeakRequestHandler {
             subscriptions: self.subscriptions.upgrade()?,
             retained_exited_outputs: self.retained_exited_outputs.upgrade()?,
             sdk_waits: self.sdk_waits.upgrade()?,
+            session_leases: self.session_leases.upgrade()?,
+            session_lease_janitor_started: self.session_lease_janitor_started.upgrade()?,
             pane_snapshot_coalescers: self.pane_snapshot_coalescers.upgrade()?,
             pane_snapshot_revisions: self.pane_snapshot_revisions.upgrade()?,
             #[cfg(test)]
@@ -297,6 +308,8 @@ impl RequestHandler {
             ))),
             retained_exited_outputs: Arc::new(StdMutex::new(RetainedExitedPaneOutputs::default())),
             sdk_waits: Arc::new(StdMutex::new(SdkWaitState::default())),
+            session_leases: Arc::new(StdMutex::new(SessionLeaseStore::default())),
+            session_lease_janitor_started: Arc::new(AtomicBool::new(false)),
             pane_snapshot_coalescers: Arc::new(StdMutex::new(
                 PaneSnapshotCoalescerRegistry::with_default_rate(),
             )),
@@ -329,6 +342,8 @@ impl RequestHandler {
             subscriptions: Arc::downgrade(&self.subscriptions),
             retained_exited_outputs: Arc::downgrade(&self.retained_exited_outputs),
             sdk_waits: Arc::downgrade(&self.sdk_waits),
+            session_leases: Arc::downgrade(&self.session_leases),
+            session_lease_janitor_started: Arc::downgrade(&self.session_lease_janitor_started),
             pane_snapshot_coalescers: Arc::downgrade(&self.pane_snapshot_coalescers),
             pane_snapshot_revisions: Arc::downgrade(&self.pane_snapshot_revisions),
             #[cfg(test)]

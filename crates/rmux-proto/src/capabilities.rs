@@ -18,6 +18,14 @@ pub const CAPABILITY_CONTROL_STREAM: &str = "stream.control";
 pub const CAPABILITY_DAEMON_SHUTDOWN: &str = "daemon.shutdown";
 /// Stable feature id for daemon-backed SDK waits and cancellation.
 pub const CAPABILITY_SDK_WAITS: &str = "sdk.waits";
+/// Stable feature id for SDK pane operations that target stable pane ids.
+pub const CAPABILITY_SDK_PANE_BY_ID: &str = "sdk.pane.by_id";
+/// Stable feature id for daemon-side SDK pane input broadcast.
+pub const CAPABILITY_SDK_PANE_BROADCAST: &str = "sdk.pane.broadcast";
+/// Stable feature id for daemon-side app-owned session leases.
+pub const CAPABILITY_SDK_SESSION_LEASE: &str = "sdk.session.lease";
+/// Stable feature id for explicit SDK process launch modes.
+pub const CAPABILITY_SDK_PROCESS_COMMAND: &str = "sdk.process.command";
 
 /// Capabilities advertised by this protocol build.
 pub const SUPPORTED_CAPABILITIES: &[&str] = &[
@@ -28,6 +36,10 @@ pub const SUPPORTED_CAPABILITIES: &[&str] = &[
     CAPABILITY_CONTROL_STREAM,
     CAPABILITY_DAEMON_SHUTDOWN,
     CAPABILITY_SDK_WAITS,
+    CAPABILITY_SDK_PANE_BY_ID,
+    CAPABILITY_SDK_PANE_BROADCAST,
+    CAPABILITY_SDK_SESSION_LEASE,
+    CAPABILITY_SDK_PROCESS_COMMAND,
 ];
 
 /// Client-to-server version and capability negotiation request.

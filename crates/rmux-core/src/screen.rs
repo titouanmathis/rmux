@@ -11,6 +11,8 @@ use rmux_proto::TerminalSize;
 mod capture;
 #[path = "screen/selection.rs"]
 mod selection;
+#[path = "screen/style_overlay.rs"]
+mod style_overlay;
 #[path = "screen/view.rs"]
 mod view;
 #[path = "screen/writer.rs"]

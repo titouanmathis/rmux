@@ -385,6 +385,7 @@ impl RequestHandler {
         )?;
 
         let socket_path = self.socket_path();
+        let process_command = rmux_proto::ProcessCommand::from_legacy_command(command.as_deref());
         let (response, inline_hooks) = capture_inline_hooks(async {
             let response = {
                 let mut state = self.state.lock().await;
@@ -397,7 +398,7 @@ impl RequestHandler {
                         detached,
                         spawn: WindowSpawnOptions {
                             start_directory: start_directory.as_deref(),
-                            command: command.as_deref(),
+                            command: process_command.as_ref(),
                             socket_path: &socket_path,
                             environment_overrides: environment.as_deref(),
                             pane_alert_callback: Some(self.pane_alert_callback()),

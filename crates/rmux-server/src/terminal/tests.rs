@@ -1,6 +1,8 @@
-use super::{parse_environment_assignments, spawn_hook_command, TerminalProfile};
+use super::{
+    parse_environment_assignments, spawn_hook_command, validate_process_command, TerminalProfile,
+};
 use rmux_core::{EnvironmentStore, OptionStore};
-use rmux_proto::{OptionName, ScopeSelector, SessionName, SetOptionMode};
+use rmux_proto::{OptionName, ProcessCommand, ScopeSelector, SessionName, SetOptionMode};
 #[cfg(windows)]
 use rmux_pty::TerminalSize as PtyTerminalSize;
 use std::collections::HashMap;
@@ -284,29 +286,56 @@ fn terminal_profile_runtime_window_name_tracks_spawned_command_shape() {
     assert_eq!(profile.runtime_window_name(None).as_deref(), Some("bash"));
     assert_eq!(
         profile
-            .runtime_window_name(Some(&["printf hi".to_owned()]))
+            .runtime_window_name(Some(&rmux_proto::ProcessCommand::Shell(
+                "printf hi".to_owned(),
+            )))
             .as_deref(),
         Some("printf")
     );
     assert_eq!(
         profile
-            .runtime_window_name(Some(&["exit 0".to_owned()]))
+            .runtime_window_name(Some(&rmux_proto::ProcessCommand::Shell(
+                "exit 0".to_owned()
+            )))
             .as_deref(),
         Some("exit")
     );
     assert_eq!(
         profile
-            .runtime_window_name(Some(&["/usr/bin/top".to_owned(), "-H".to_owned()]))
+            .runtime_window_name(Some(&rmux_proto::ProcessCommand::Argv(vec![
+                "/usr/bin/top".to_owned(),
+                "-H".to_owned(),
+            ])))
             .as_deref(),
         Some("top")
     );
     assert_eq!(profile.automatic_window_name(None).as_deref(), Some("rmux"));
     assert_eq!(
         profile
-            .automatic_window_name(Some(&["sleep 30".to_owned()]))
+            .automatic_window_name(Some(&rmux_proto::ProcessCommand::Shell(
+                "sleep 30".to_owned(),
+            )))
             .as_deref(),
         Some("sleep")
     );
+}
+
+#[test]
+fn explicit_empty_process_commands_are_rejected() {
+    for command in [
+        ProcessCommand::Argv(Vec::new()),
+        ProcessCommand::Argv(vec![String::new()]),
+        ProcessCommand::Shell(String::new()),
+    ] {
+        let error = validate_process_command(Some(&command))
+            .expect_err("explicit empty process commands must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("process command must not be empty"),
+            "unexpected validation error: {error}"
+        );
+    }
 }
 
 #[cfg(unix)]

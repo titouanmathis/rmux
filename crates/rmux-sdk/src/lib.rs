@@ -43,10 +43,7 @@
 //!             .policy(EnsureSessionPolicy::CreateOrReuse)
 //!             .detached(true)
 //!             .size(TerminalSizeSpec::new(120, 32))
-//!             .process(ProcessSpec {
-//!                 command: None,
-//!                 environment: None,
-//!             }),
+//!             .process(ProcessSpec::default()),
 //!     )
 //!     .await?;
 //! assert!(session.exists().await?);
@@ -54,9 +51,14 @@
 //! # }
 //! ```
 //!
+pub mod actions;
 pub mod bootstrap;
+pub mod broadcast;
+pub(crate) mod capabilities;
+pub mod capture;
 pub mod command;
 pub mod diagnostics;
+pub mod discovery;
 pub mod ensure;
 pub mod error;
 pub mod events;
@@ -64,35 +66,58 @@ pub mod extract;
 pub mod handles;
 pub mod info;
 pub mod input;
+pub mod layout;
+pub mod load_state;
+pub mod locator;
+pub mod pane_set;
 pub mod snapshot;
 pub mod spec;
+pub mod trace;
 pub mod types;
 pub mod wait;
 
 #[allow(dead_code)]
 pub(crate) mod transport;
 
+pub use actions::{FillStrategy, PaneKeyboard, PaneMouse, PaneSetKeyboard};
+pub use broadcast::{
+    BroadcastPaneFailure, BroadcastPaneSuccess, BroadcastResult, Input, PartialBroadcastFailure,
+};
+pub use capture::{CaptureBuilder, CapturedRegion, Rect};
 pub use command::{RmuxCommand, RmuxCommandKind};
 pub use diagnostics::{
     command_feature_id, protocol_diagnostic, unsupported_feature_id, Diagnostic,
     DiagnosticSeverity, FEATURE_DAEMON_SHUTDOWN, FEATURE_PROTOCOL_CAPABILITIES,
     FEATURE_PROTOCOL_WIRE_VERSION, FEATURE_TRANSPORT_UNIX_SOCKET, FEATURE_TRANSPORT_WINDOWS_PIPE,
 };
+pub use discovery::{DiscoveredPane, DiscoveredSession, PaneFinder, SessionFinder};
 pub use ensure::{EnsureSession, EnsureSessionPolicy};
 pub use error::{CollectError, Result, RmuxError};
 pub use events::{
     PaneCommandStatus, PaneCommandSummary, PaneDisconnectReason, PaneEvent, PaneExitReason,
     PaneLagNotice, PaneLineItem, PaneLineStream, PaneNotification, PaneOutputChunk,
-    PaneOutputStart, PaneOutputStream, PanePermissionScope, PaneRecentOutput,
+    PaneOutputStart, PaneOutputStream, PanePermissionScope, PaneRecentOutput, PaneRenderStream,
+    RenderUpdate,
 };
 pub use extract::{CollectedPaneOutput, PaneTextMatch};
 pub use handles::{
-    Pane, PaneCloseOutcome, PaneRespawnOptions, Rmux, RmuxBuilder, Session, SplitDirection, Window,
-    WindowCloseOutcome, WindowPane,
+    CleanupPolicy, LeaseState, OwnedSession, OwnedSessionBuilder, OwnedSessionSignalHandlers, Pane,
+    PaneCloseOutcome, PaneRespawnOptions, PaneSpawnBuilder, PaneSplitBuilder, Rmux, RmuxBuilder,
+    Session, SplitDirection, Window, WindowCloseOutcome, WindowPane,
 };
 pub use info::{InfoSnapshot, PaneExitState, PaneInfo, PaneProcessState, SessionInfo, WindowInfo};
 pub use input::{
     DetachChord, DetachDetector, DetachOutcome, KeyCode, KeyConversionError, KeyEvent, KeyModifiers,
+};
+pub use layout::{GridLayoutBuilder, LayoutPaneBuilder, SessionLayoutBuilder};
+pub use load_state::{TerminalLoadState, TerminalLoadStateWait};
+pub use locator::{
+    Locator, LocatorAssertion, LocatorExpectation, LocatorFilter, LocatorMatch, LocatorState,
+    LocatorText, LocatorWait,
+};
+pub use pane_set::{
+    PaneSet, PaneSetAny, PaneSetBatch, PaneSetExpectation, PaneSetFailure, PaneSetSuccess,
+    PaneSetVisibleTextOutcome, PaneSetVisibleTextWait,
 };
 pub use snapshot::{
     PaneAttributes, PaneCell, PaneColor, PaneCursor, PaneGlyph, PaneSnapshot,
@@ -100,11 +125,12 @@ pub use snapshot::{
 };
 pub use spec::{
     AttachSessionReuse, AttachSessionSpec, ClientTerminalSpec, NewSessionReuse, NewSessionSpec,
-    ProcessSpec, RefreshClientSpec, SplitDirectionSpec, SplitSpec, SplitTargetSpec,
-    SubscriptionSpec,
+    ProcessCommandSpec, ProcessSpec, RefreshClientSpec, SplitDirectionSpec, SplitSpec,
+    SplitTargetSpec, SubscriptionSpec,
 };
+pub use trace::{RmuxTraceBuilder, TraceSession};
 pub use types::{
     PaneId, PaneRef, RmuxEndpoint, SessionId, SessionName, TargetRef, TerminalSizeSpec, WindowId,
     WindowRef,
 };
-pub use wait::ArmedWait;
+pub use wait::{ArmedWait, VisibleTextExpectation, VisibleTextWait, WaitTimeoutError};

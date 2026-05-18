@@ -1,10 +1,13 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::path::PathBuf;
 
 use crate::{
-    PaneOutputSubscriptionId, PaneTarget, ResizePaneAdjustment, SessionName, SplitDirection,
-    WindowTarget,
+    PaneOutputSubscriptionId, PaneTarget, PaneTargetRef, ProcessCommand, ResizePaneAdjustment,
+    SessionName, SplitDirection, WindowTarget,
 };
+
+#[path = "pane/compat.rs"]
+mod compat;
 
 /// Target forms accepted by `split-window`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,7 +35,7 @@ pub struct SplitWindowRequest {
 }
 
 /// Extended request payload for `split-window`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SplitWindowExtRequest {
     /// The exact split target.
     pub target: SplitWindowTarget,
@@ -45,9 +48,41 @@ pub struct SplitWindowExtRequest {
     /// Optional per-spawn environment overrides in `NAME=VALUE` form.
     #[serde(default)]
     pub environment: Option<Vec<String>>,
-    /// Optional command argv for the new pane. A single argument runs via `$SHELL -c`.
+    /// Legacy optional command argv for the new pane. A single argument runs
+    /// via `$SHELL -c`.
     #[serde(default)]
     pub command: Option<Vec<String>>,
+    /// Explicit process launch mode for the new pane.
+    #[serde(default)]
+    pub process_command: Option<ProcessCommand>,
+    /// Optional working-directory override for the new pane process.
+    #[serde(default)]
+    pub start_directory: Option<PathBuf>,
+    /// Optional pane-local `remain-on-exit` override applied before spawn.
+    #[serde(default)]
+    pub keep_alive_on_exit: Option<bool>,
+}
+
+impl<'de> Deserialize<'de> for SplitWindowExtRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_struct(
+            "SplitWindowExtRequest",
+            &[
+                "target",
+                "direction",
+                "before",
+                "environment",
+                "command",
+                "process_command",
+                "start_directory",
+                "keep_alive_on_exit",
+            ],
+            compat::SplitWindowExtRequestVisitor,
+        )
+    }
 }
 
 /// The supported relative directions for `swap-pane`.
@@ -219,7 +254,7 @@ pub struct PipePaneRequest {
 }
 
 /// Request payload for `respawn-pane`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RespawnPaneRequest {
     /// The exact pane target.
     pub target: PaneTarget,
@@ -232,9 +267,33 @@ pub struct RespawnPaneRequest {
     /// Optional per-spawn environment overrides in `NAME=VALUE` form.
     #[serde(default)]
     pub environment: Option<Vec<String>>,
-    /// Optional shell command argv. A single argument is executed via `$SHELL -c`.
+    /// Legacy optional shell command argv. A single argument is executed via
+    /// `$SHELL -c`.
     #[serde(default)]
     pub command: Option<Vec<String>>,
+    /// Explicit process launch mode.
+    #[serde(default)]
+    pub process_command: Option<ProcessCommand>,
+}
+
+impl<'de> Deserialize<'de> for RespawnPaneRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_struct(
+            "RespawnPaneRequest",
+            &[
+                "target",
+                "kill",
+                "start_directory",
+                "environment",
+                "command",
+                "process_command",
+            ],
+            compat::RespawnPaneRequestVisitor,
+        )
+    }
 }
 
 /// Request payload for `select-pane`.
@@ -243,6 +302,94 @@ pub struct SelectPaneRequest {
     /// The exact pane target.
     pub target: PaneTarget,
     /// Optional pane title to set without changing the active pane (`-T`).
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+/// SDK pane input request that can address a stable pane id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneInputRequest {
+    /// The exact pane target or stable pane id.
+    pub target: PaneTargetRef,
+    /// Text or key tokens to send.
+    pub keys: Vec<String>,
+    /// Whether tokens should be written literally instead of interpreted as
+    /// tmux-compatible key names.
+    #[serde(default)]
+    pub literal: bool,
+}
+
+/// SDK pane input broadcast request with stable pane-id targeting.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneBroadcastInputRequest {
+    /// Pane targets addressed in caller order.
+    pub targets: Vec<PaneTargetRef>,
+    /// Text or key tokens to send to each pane.
+    pub keys: Vec<String>,
+    /// Whether tokens should be written literally instead of interpreted as
+    /// tmux-compatible key names.
+    #[serde(default)]
+    pub literal: bool,
+}
+
+/// SDK resize request that can address a stable pane id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneResizeRequest {
+    /// The exact pane target or stable pane id.
+    pub target: PaneTargetRef,
+    /// The semantic resize request.
+    pub adjustment: ResizePaneAdjustment,
+}
+
+/// SDK kill request that can address a stable pane id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneKillRequest {
+    /// The exact pane target or stable pane id.
+    pub target: PaneTargetRef,
+    /// Whether all panes except the target should be killed.
+    #[serde(default)]
+    pub kill_all_except: bool,
+}
+
+/// SDK respawn request that can address a stable pane id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneRespawnRequest {
+    /// The exact pane target or stable pane id.
+    pub target: PaneTargetRef,
+    /// Whether a running pane should be killed before respawning.
+    #[serde(default)]
+    pub kill: bool,
+    /// Optional working-directory override.
+    #[serde(default)]
+    pub start_directory: Option<PathBuf>,
+    /// Optional per-spawn environment overrides in `NAME=VALUE` form.
+    #[serde(default)]
+    pub environment: Option<Vec<String>>,
+    /// Legacy optional shell command argv. A single argument is executed via
+    /// `$SHELL -c`.
+    #[serde(default)]
+    pub command: Option<Vec<String>>,
+    /// Explicit process launch mode.
+    #[serde(default)]
+    pub process_command: Option<ProcessCommand>,
+    /// Optional pane-local `remain-on-exit` override applied before respawn.
+    #[serde(default)]
+    pub keep_alive_on_exit: Option<bool>,
+}
+
+/// SDK snapshot request that can address a stable pane id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneSnapshotRefRequest {
+    /// The exact pane target or stable pane id.
+    pub target: PaneTargetRef,
+}
+
+/// SDK select/title request that can address a stable pane id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneSelectRequest {
+    /// The exact pane target or stable pane id.
+    pub target: PaneTargetRef,
+    /// Optional pane title to set without changing the active pane.
     #[serde(default)]
     pub title: Option<String>,
 }
@@ -309,6 +456,16 @@ pub enum PaneOutputSubscriptionStart {
 pub struct SubscribePaneOutputRequest {
     /// The exact pane target whose output should be subscribed.
     pub target: PaneTarget,
+    /// The initial cursor position.
+    pub start: PaneOutputSubscriptionStart,
+}
+
+/// Request payload for subscribing to live pane-output events by slot or id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubscribePaneOutputRefRequest {
+    /// The exact pane target or stable pane id whose output should be
+    /// subscribed.
+    pub target: PaneTargetRef,
     /// The initial cursor position.
     pub start: PaneOutputSubscriptionStart,
 }

@@ -102,8 +102,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 use std::time::Duration;
 
 use rmux_sdk::{
-    EnsureSession, EnsureSessionPolicy, ProcessSpec, Rmux, SessionName,
-    TerminalSizeSpec,
+    EnsureSession, EnsureSessionPolicy, Rmux, SessionName, TerminalSizeSpec,
 };
 
 #[tokio::main]
@@ -119,11 +118,7 @@ async fn main() -> rmux_sdk::Result<()> {
             EnsureSession::named(session_name)
                 .policy(EnsureSessionPolicy::CreateOrReuse)
                 .detached(true)
-                .size(TerminalSizeSpec::new(120, 32))
-                .process(ProcessSpec {
-                    command: None,
-                    environment: None,
-                }),
+                .size(TerminalSizeSpec::new(120, 32)),
         )
         .await?;
 

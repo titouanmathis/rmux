@@ -1,21 +1,16 @@
 use crate::handles::session::unexpected_response;
-use crate::transport::TransportClient;
 use crate::{
-    PaneAttributes, PaneCell, PaneColor, PaneCursor, PaneGlyph, PaneRef, PaneSnapshot, Result,
+    Pane, PaneAttributes, PaneCell, PaneColor, PaneCursor, PaneGlyph, PaneSnapshot, Result,
 };
 use rmux_proto::{
-    PaneSnapshotCell, PaneSnapshotCursor, PaneSnapshotRequest, PaneSnapshotResponse, Request,
-    Response,
+    PaneSnapshotCell, PaneSnapshotCursor, PaneSnapshotRefRequest, PaneSnapshotRequest,
+    PaneSnapshotResponse, Request, Response, CAPABILITY_SDK_PANE_BY_ID,
 };
 
-use super::info::current_pane_entry;
 use super::target::{is_already_closed_error, parse_error};
 
-pub(super) async fn pane_snapshot(
-    client: &TransportClient,
-    target: &PaneRef,
-) -> Result<PaneSnapshot> {
-    if current_pane_entry(client, target).await?.is_none() {
+pub(super) async fn pane_snapshot(pane: &Pane) -> Result<PaneSnapshot> {
+    if pane.id().await?.is_none() {
         return Ok(PaneSnapshot::default());
     }
 
@@ -24,22 +19,28 @@ pub(super) async fn pane_snapshot(
     // trip. Treat the already-closed protocol errors emitted in that window as
     // a "vanished mid-snapshot" signal and degrade to a default snapshot,
     // while genuine transport or protocol errors still propagate.
-    match request_pane_snapshot(client, target).await {
+    match request_pane_snapshot(pane).await {
         Ok(response) => snapshot_from_response(response),
-        Err(error) if is_already_closed_error(&error, target) => Ok(PaneSnapshot::default()),
+        Err(error) if is_already_closed_error(&error, pane.target()) => Ok(PaneSnapshot::default()),
         Err(error) => Err(error),
     }
 }
 
-async fn request_pane_snapshot(
-    client: &TransportClient,
-    target: &PaneRef,
-) -> Result<PaneSnapshotResponse> {
-    let response = client
-        .request(Request::PaneSnapshot(PaneSnapshotRequest {
-            target: target.into(),
-        }))
-        .await?;
+async fn request_pane_snapshot(pane: &Pane) -> Result<PaneSnapshotResponse> {
+    let response = if pane.stable_id.is_some() {
+        crate::capabilities::require(pane.transport(), &[CAPABILITY_SDK_PANE_BY_ID]).await?;
+        pane.transport()
+            .request(Request::PaneSnapshotRef(PaneSnapshotRefRequest {
+                target: pane.proto_target_ref(),
+            }))
+            .await?
+    } else {
+        pane.transport()
+            .request(Request::PaneSnapshot(PaneSnapshotRequest {
+                target: pane.target().into(),
+            }))
+            .await?
+    };
 
     match response {
         Response::PaneSnapshot(response) => Ok(response),

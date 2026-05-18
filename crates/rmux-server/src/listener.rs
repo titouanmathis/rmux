@@ -257,7 +257,10 @@ fn request_cancels_on_peer_disconnect(request: &Request) -> bool {
         request,
         Request::WaitFor(wait)
             if matches!(wait.mode, WaitForMode::Wait | WaitForMode::Lock)
-    ) || matches!(request, Request::SdkWaitForOutput(_))
+    ) || matches!(
+        request,
+        Request::SdkWaitForOutput(_) | Request::SdkWaitForOutputRef(_)
+    )
 }
 
 fn drain_finished_connection_tasks(tasks: &mut JoinSet<io::Result<()>>) {

@@ -31,22 +31,14 @@ async fn main() -> Result<()> {
     .await?;
 
     // example:start
-    use rmux_sdk::{EnsureSession, ProcessSpec, Rmux};
+    use rmux_sdk::{EnsureSession, Rmux};
     let rmux = Rmux::builder().connect_or_start().await?;
     let _session = rmux
         .ensure_session(
             EnsureSession::try_named("api-server")?
                 .create_or_reuse()
                 .detached(true)
-                .process(ProcessSpec {
-                    command: Some(vec![
-                        "python3".into(),
-                        "-m".into(),
-                        "http.server".into(),
-                        "8080".into(),
-                    ]),
-                    environment: None,
-                }),
+                .argv(["python3", "-m", "http.server", "8080"]),
         )
         .await?;
     // The handle is dropped here. The daemon keeps the python server

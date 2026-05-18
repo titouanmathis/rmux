@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::{
-    ControlModeRequest, HandshakeRequest, PaneTarget, SdkWaitId, SdkWaitOwnerId, SessionName,
-    Target, WindowTarget,
+    ControlModeRequest, HandshakeRequest, PaneTarget, PaneTargetRef, SdkWaitId, SdkWaitOwnerId,
+    SessionName, Target, WindowTarget,
 };
 
 #[path = "request/show.rs"]
@@ -24,12 +24,13 @@ pub use layout::{
 mod pane;
 pub use pane::{
     BreakPaneRequest, DisplayPanesRequest, JoinPaneRequest, KillPaneRequest, LastPaneRequest,
-    MovePaneRequest, PaneOutputCursorRequest, PaneOutputSubscriptionStart, PaneSnapshotRequest,
-    PaneSplitSize, PipePaneRequest, ResizePaneRequest, RespawnPaneRequest,
-    SelectPaneAdjacentRequest, SelectPaneDirection, SelectPaneMarkRequest, SelectPaneRequest,
-    SendKeysExtRequest, SendKeysRequest, SplitWindowExtRequest, SplitWindowRequest,
-    SplitWindowTarget, SubscribePaneOutputRequest, SwapPaneDirection, SwapPaneRequest,
-    UnsubscribePaneOutputRequest,
+    MovePaneRequest, PaneBroadcastInputRequest, PaneInputRequest, PaneKillRequest,
+    PaneOutputCursorRequest, PaneOutputSubscriptionStart, PaneResizeRequest, PaneRespawnRequest,
+    PaneSelectRequest, PaneSnapshotRefRequest, PaneSnapshotRequest, PaneSplitSize, PipePaneRequest,
+    ResizePaneRequest, RespawnPaneRequest, SelectPaneAdjacentRequest, SelectPaneDirection,
+    SelectPaneMarkRequest, SelectPaneRequest, SendKeysExtRequest, SendKeysRequest,
+    SplitWindowExtRequest, SplitWindowRequest, SplitWindowTarget, SubscribePaneOutputRefRequest,
+    SubscribePaneOutputRequest, SwapPaneDirection, SwapPaneRequest, UnsubscribePaneOutputRequest,
 };
 
 #[path = "request/window.rs"]
@@ -48,8 +49,9 @@ pub use target::{ResolveTargetRequest, ResolveTargetType};
 #[path = "request/session.rs"]
 mod session;
 pub use session::{
-    HasSessionRequest, KillSessionRequest, ListSessionsRequest, NewSessionExtRequest,
-    NewSessionRequest, RenameSessionRequest,
+    CreateSessionLeaseRequest, HasSessionRequest, KillSessionRequest, ListSessionsRequest,
+    NewSessionExtRequest, NewSessionRequest, ReleaseSessionLeaseRequest, RenameSessionRequest,
+    RenewSessionLeaseRequest,
 };
 
 #[path = "request/server.rs"]
@@ -293,6 +295,30 @@ pub enum Request {
     SdkWaitForOutput(SdkWaitForOutputRequest),
     /// Internal daemon-backed SDK wait cancellation endpoint.
     CancelSdkWait(CancelSdkWaitRequest),
+    /// SDK pane input endpoint with stable pane-id targeting.
+    PaneInput(PaneInputRequest),
+    /// SDK pane resize endpoint with stable pane-id targeting.
+    PaneResize(PaneResizeRequest),
+    /// SDK pane kill endpoint with stable pane-id targeting.
+    PaneKill(PaneKillRequest),
+    /// SDK pane respawn endpoint with stable pane-id targeting.
+    PaneRespawn(PaneRespawnRequest),
+    /// SDK pane snapshot endpoint with stable pane-id targeting.
+    PaneSnapshotRef(PaneSnapshotRefRequest),
+    /// SDK pane select/title endpoint with stable pane-id targeting.
+    PaneSelect(PaneSelectRequest),
+    /// SDK pane input broadcast endpoint with stable pane-id targeting.
+    PaneBroadcastInput(PaneBroadcastInputRequest),
+    /// SDK app-owned session lease create endpoint.
+    CreateSessionLease(CreateSessionLeaseRequest),
+    /// SDK app-owned session lease renewal endpoint.
+    RenewSessionLease(RenewSessionLeaseRequest),
+    /// SDK app-owned session lease release endpoint.
+    ReleaseSessionLease(ReleaseSessionLeaseRequest),
+    /// Internal daemon-backed pane output subscription endpoint with stable pane-id targeting.
+    SubscribePaneOutputRef(SubscribePaneOutputRefRequest),
+    /// Internal daemon-backed SDK byte wait endpoint with stable pane-id targeting.
+    SdkWaitForOutputRef(SdkWaitForOutputRefRequest),
 }
 
 impl Request {
@@ -347,11 +373,23 @@ impl Request {
             Self::SaveBuffer(_) => "save-buffer",
             Self::CapturePane(_) => "capture-pane",
             Self::PaneSnapshot(_) => "pane-snapshot",
-            Self::SubscribePaneOutput(_) => "subscribe-pane-output",
+            Self::SubscribePaneOutput(_) | Self::SubscribePaneOutputRef(_) => {
+                "subscribe-pane-output"
+            }
             Self::UnsubscribePaneOutput(_) => "unsubscribe-pane-output",
             Self::PaneOutputCursor(_) => "pane-output-cursor",
-            Self::SdkWaitForOutput(_) => "sdk-wait-output",
+            Self::SdkWaitForOutput(_) | Self::SdkWaitForOutputRef(_) => "sdk-wait-output",
             Self::CancelSdkWait(_) => "cancel-sdk-wait",
+            Self::PaneInput(_) => "send-keys",
+            Self::PaneBroadcastInput(_) => "send-keys",
+            Self::CreateSessionLease(_) => "create-session-lease",
+            Self::RenewSessionLease(_) => "renew-session-lease",
+            Self::ReleaseSessionLease(_) => "release-session-lease",
+            Self::PaneResize(_) => "resize-pane",
+            Self::PaneKill(_) => "kill-pane",
+            Self::PaneRespawn(_) => "respawn-pane",
+            Self::PaneSnapshotRef(_) => "pane-snapshot",
+            Self::PaneSelect(_) => "select-pane",
             Self::DisplayMessage(_) => "display-message",
             Self::ResolveTarget(_) => "resolve-target",
             Self::RunShell(_) => "run-shell",
@@ -562,6 +600,21 @@ pub struct SdkWaitForOutputRequest {
     pub start: PaneOutputSubscriptionStart,
 }
 
+/// Request payload for a daemon-backed SDK byte wait by slot or stable id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SdkWaitForOutputRefRequest {
+    /// Opaque SDK transport owner for this wait.
+    pub owner_id: SdkWaitOwnerId,
+    /// Wait ID allocated by the SDK under `owner_id`.
+    pub wait_id: SdkWaitId,
+    /// Pane whose raw output stream is observed.
+    pub target: PaneTargetRef,
+    /// Raw byte sequence to search for in pane output.
+    pub bytes: Vec<u8>,
+    /// Cursor position used when arming the wait.
+    pub start: PaneOutputSubscriptionStart,
+}
+
 /// Request payload for best-effort cancellation of a daemon-backed SDK wait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CancelSdkWaitRequest {
@@ -621,6 +674,7 @@ mod tests {
                 print_session_info: false,
                 print_format: None,
                 command: None,
+                process_command: None,
             })
             .command_name(),
             "new-session"
@@ -632,6 +686,9 @@ mod tests {
                 before: false,
                 environment: None,
                 command: None,
+                process_command: None,
+                start_directory: None,
+                keep_alive_on_exit: None,
             })
             .command_name(),
             "split-window"

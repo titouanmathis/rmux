@@ -37,6 +37,29 @@ pub struct KillSessionResponse {
     pub existed: bool,
 }
 
+/// Response payload for creating an app-owner session lease.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateSessionLeaseResponse {
+    /// Server-issued lease token.
+    pub token: u64,
+    /// Effective lease time-to-live in milliseconds.
+    pub ttl_millis: u64,
+}
+
+/// Response payload for renewing an app-owner session lease.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenewSessionLeaseResponse {
+    /// Whether the lease was renewed.
+    pub renewed: bool,
+}
+
+/// Response payload for releasing an app-owner session lease.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseSessionLeaseResponse {
+    /// Whether a matching lease was released.
+    pub released: bool,
+}
+
 /// Response payload for `rename-session`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenameSessionResponse {

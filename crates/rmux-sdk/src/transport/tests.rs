@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
 use rmux_proto::{
-    encode_frame, ErrorResponse, HandshakeRequest, HasSessionRequest, HasSessionResponse,
-    ListSessionsRequest, ListSessionsResponse, Request, Response, SdkWaitId, SessionName,
+    encode_frame, ErrorResponse, HandshakeRequest, HandshakeResponse, HasSessionRequest,
+    HasSessionResponse, ListSessionsRequest, ListSessionsResponse, Request, Response, SdkWaitId,
+    SessionName, CAPABILITY_HANDSHAKE, CAPABILITY_SDK_PANE_BY_ID,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::task::JoinHandle;
@@ -319,6 +320,60 @@ async fn handshake_response_decode_mismatch_maps_to_stable_sdk_feature() {
     assert_unsupported_feature(
         join_request(request).await,
         crate::FEATURE_PROTOCOL_CAPABILITIES,
+    );
+}
+
+#[tokio::test]
+async fn capability_require_caches_handshake_per_transport() {
+    let (client_stream, mut server_stream) = tokio::io::duplex(4096);
+    let client = TransportClient::spawn(client_stream);
+
+    let first_require = {
+        let client = client.clone();
+        tokio::spawn(async move {
+            crate::capabilities::require(&client, &[CAPABILITY_SDK_PANE_BY_ID]).await
+        })
+    };
+
+    match read_request(&mut server_stream).await {
+        Request::Handshake(HandshakeRequest {
+            required_capabilities,
+            ..
+        }) => {
+            assert_eq!(required_capabilities, vec![CAPABILITY_HANDSHAKE.to_owned()]);
+        }
+        request => panic!("expected capability handshake, got {request:?}"),
+    }
+    write_response(
+        &mut server_stream,
+        &Response::Handshake(HandshakeResponse {
+            wire_version: rmux_proto::RMUX_WIRE_VERSION,
+            capabilities: vec![
+                CAPABILITY_HANDSHAKE.to_owned(),
+                CAPABILITY_SDK_PANE_BY_ID.to_owned(),
+            ],
+        }),
+    )
+    .await;
+    first_require
+        .await
+        .expect("require task must not panic")
+        .expect("first require succeeds");
+
+    crate::capabilities::require(&client, &[CAPABILITY_SDK_PANE_BY_ID])
+        .await
+        .expect("second require uses cached capabilities");
+
+    let request = spawn_request(&client, has_session_request());
+    assert_eq!(
+        read_request(&mut server_stream).await,
+        has_session_request(),
+        "cached capability check must not send another handshake before the next request"
+    );
+    write_response(&mut server_stream, &has_session_response(true)).await;
+    assert_eq!(
+        join_request(request).await.expect("request succeeds"),
+        has_session_response(true)
     );
 }
 

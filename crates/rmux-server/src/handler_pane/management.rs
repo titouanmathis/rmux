@@ -10,6 +10,7 @@ use crate::format_runtime::render_runtime_template;
 use crate::hook_runtime::PendingInlineHookFormat;
 use crate::pane_io::AttachControl;
 use crate::pane_terminals::HandlerState;
+use crate::terminal::validate_process_command;
 
 const DEFAULT_BREAK_PANE_FORMAT: &str = "#{session_name}:#{window_index}.#{pane_index}";
 
@@ -18,6 +19,17 @@ struct UnlinkedWindowSnapshot {
     target: WindowTarget,
     window_id: u32,
     window_name: String,
+}
+
+struct SplitWindowParts {
+    target: rmux_proto::SplitWindowTarget,
+    direction: rmux_proto::SplitDirection,
+    before: bool,
+    environment_overrides: Option<Vec<String>>,
+    command: Option<Vec<String>>,
+    process_command: Option<rmux_proto::ProcessCommand>,
+    start_directory: Option<std::path::PathBuf>,
+    keep_alive_on_exit: Option<bool>,
 }
 
 impl RequestHandler {
@@ -261,13 +273,16 @@ impl RequestHandler {
         &self,
         request: rmux_proto::SplitWindowRequest,
     ) -> Response {
-        self.handle_split_window_parts(
-            request.target,
-            request.direction,
-            request.before,
-            request.environment,
-            None,
-        )
+        self.handle_split_window_parts(SplitWindowParts {
+            target: request.target,
+            direction: request.direction,
+            before: request.before,
+            environment_overrides: request.environment,
+            command: None,
+            process_command: None,
+            start_directory: None,
+            keep_alive_on_exit: None,
+        })
         .await
     }
 
@@ -275,29 +290,40 @@ impl RequestHandler {
         &self,
         request: rmux_proto::SplitWindowExtRequest,
     ) -> Response {
-        self.handle_split_window_parts(
-            request.target,
-            request.direction,
-            request.before,
-            request.environment,
-            request.command,
-        )
+        self.handle_split_window_parts(SplitWindowParts {
+            target: request.target,
+            direction: request.direction,
+            before: request.before,
+            environment_overrides: request.environment,
+            command: request.command,
+            process_command: request.process_command,
+            start_directory: request.start_directory,
+            keep_alive_on_exit: request.keep_alive_on_exit,
+        })
         .await
     }
 
-    async fn handle_split_window_parts(
-        &self,
-        target: rmux_proto::SplitWindowTarget,
-        direction: rmux_proto::SplitDirection,
-        before: bool,
-        environment_overrides: Option<Vec<String>>,
-        command: Option<Vec<String>>,
-    ) -> Response {
+    async fn handle_split_window_parts(&self, parts: SplitWindowParts) -> Response {
+        let SplitWindowParts {
+            target,
+            direction,
+            before,
+            environment_overrides,
+            command,
+            process_command,
+            start_directory,
+            keep_alive_on_exit,
+        } = parts;
         let session_name = match &target {
             rmux_proto::SplitWindowTarget::Session(session_name) => session_name.clone(),
             rmux_proto::SplitWindowTarget::Pane(target) => target.session_name().clone(),
         };
         let socket_path = self.socket_path();
+        let process_command = process_command
+            .or_else(|| rmux_proto::ProcessCommand::from_legacy_command(command.as_deref()));
+        if let Err(error) = validate_process_command(process_command.as_ref()) {
+            return Response::Error(ErrorResponse { error });
+        }
         let response = {
             let mut state = self.state.lock().await;
             match state.split_window(
@@ -306,7 +332,9 @@ impl RequestHandler {
                 before,
                 &socket_path,
                 environment_overrides.as_deref(),
-                command.as_deref(),
+                process_command.as_ref(),
+                start_directory.as_deref(),
+                keep_alive_on_exit,
                 Some(self.pane_alert_callback()),
                 Some(self.pane_exit_callback()),
             ) {
@@ -420,6 +448,7 @@ impl RequestHandler {
             self.cleanup_pane_output_subscriptions(&removed_subscription_keys)
                 .await;
             if session_destroyed {
+                self.remove_session_leases(std::slice::from_ref(&session_name));
                 self.exit_attached_session(&session_name).await;
                 self.cancel_session_silence_timers(&session_name).await;
                 self.refresh_control_session(&session_name).await;

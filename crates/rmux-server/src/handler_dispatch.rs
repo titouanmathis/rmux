@@ -110,6 +110,15 @@ impl RequestHandler {
             Request::KillSession(request) => {
                 HandleOutcome::response(self.handle_kill_session(request).await)
             }
+            Request::CreateSessionLease(request) => {
+                HandleOutcome::response(self.handle_create_session_lease(request).await)
+            }
+            Request::RenewSessionLease(request) => {
+                HandleOutcome::response(self.handle_renew_session_lease(request).await)
+            }
+            Request::ReleaseSessionLease(request) => {
+                HandleOutcome::response(self.handle_release_session_lease(request).await)
+            }
             Request::RenameSession(request) => {
                 HandleOutcome::response(self.handle_rename_session(request).await)
             }
@@ -248,6 +257,9 @@ impl RequestHandler {
             Request::SendKeysExt(request) => HandleOutcome::response(
                 Box::pin(self.handle_send_keys_ext(requester_pid, request)).await,
             ),
+            Request::PaneBroadcastInput(request) => {
+                HandleOutcome::response(self.handle_pane_broadcast_input(request).await)
+            }
             Request::BindKey(request) => {
                 HandleOutcome::response(self.handle_bind_key(request).await)
             }
@@ -330,6 +342,10 @@ impl RequestHandler {
                 self.handle_subscribe_pane_output(connection_id, request)
                     .await,
             ),
+            Request::SubscribePaneOutputRef(request) => HandleOutcome::response(
+                self.handle_subscribe_pane_output_ref(connection_id, request)
+                    .await,
+            ),
             Request::UnsubscribePaneOutput(request) => HandleOutcome::response(
                 self.handle_unsubscribe_pane_output(connection_id, request)
                     .await,
@@ -339,6 +355,10 @@ impl RequestHandler {
             ),
             Request::SdkWaitForOutput(request) => HandleOutcome::response(
                 self.handle_sdk_wait_for_output(connection_id, request)
+                    .await,
+            ),
+            Request::SdkWaitForOutputRef(request) => HandleOutcome::response(
+                self.handle_sdk_wait_for_output_ref(connection_id, request)
                     .await,
             ),
             Request::CancelSdkWait(request) => {
@@ -415,6 +435,24 @@ impl RequestHandler {
                         terminal_context,
                     },
                 )
+            }
+            Request::PaneInput(request) => {
+                HandleOutcome::response(self.handle_pane_input_ref(request).await)
+            }
+            Request::PaneResize(request) => {
+                HandleOutcome::response(self.handle_pane_resize_ref(request).await)
+            }
+            Request::PaneKill(request) => {
+                HandleOutcome::response(self.handle_pane_kill_ref(request).await)
+            }
+            Request::PaneRespawn(request) => {
+                HandleOutcome::response(self.handle_pane_respawn_ref(request).await)
+            }
+            Request::PaneSnapshotRef(request) => {
+                HandleOutcome::response(self.handle_pane_snapshot_ref(request).await)
+            }
+            Request::PaneSelect(request) => {
+                HandleOutcome::response(self.handle_pane_select_ref(request).await)
             }
             _ => HandleOutcome::response(Response::Error(ErrorResponse {
                 error: RmuxError::Server(format!(

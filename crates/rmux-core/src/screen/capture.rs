@@ -21,6 +21,20 @@ impl Screen {
         capture_grid_bytes(&self.grid, &self.hyperlinks, range, options)
     }
 
+    /// Captures physical lines with each line rendered from a fresh ANSI state.
+    ///
+    /// This is intended for renderers that repaint individual terminal rows:
+    /// a row must carry its own SGR state instead of depending on a previous
+    /// captured row having been emitted first.
+    #[must_use]
+    pub fn capture_transcript_lines_independent(
+        &self,
+        range: ScreenCaptureRange,
+        options: GridRenderOptions,
+    ) -> Vec<Vec<u8>> {
+        capture_grid_lines_independent(&self.grid, &self.hyperlinks, range, options)
+    }
+
     /// Captures the saved pre-alternate-screen copy when alternate mode is active.
     #[must_use]
     pub fn capture_saved_transcript(
@@ -32,6 +46,30 @@ impl Screen {
             .as_ref()
             .map(|saved| capture_grid_bytes(&saved.grid, &self.hyperlinks, range, options))
     }
+}
+
+fn capture_grid_lines_independent(
+    grid: &Grid,
+    hyperlinks: &Hyperlinks,
+    range: ScreenCaptureRange,
+    options: GridRenderOptions,
+) -> Vec<Vec<u8>> {
+    let total_lines = grid.hsize() + usize::try_from(grid.sy()).unwrap_or(usize::MAX);
+    let Some(range) = resolve_screen_capture_range(range, grid.hsize(), total_lines) else {
+        return Vec::new();
+    };
+
+    let mut output = Vec::new();
+    for absolute_y in range {
+        let mut state = GridStringState::default();
+        let Some(line) =
+            grid.render_absolute_line(absolute_y, options, &mut state, Some(hyperlinks))
+        else {
+            continue;
+        };
+        output.push(line.into_bytes());
+    }
+    output
 }
 
 fn capture_grid_bytes(

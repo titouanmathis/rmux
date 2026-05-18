@@ -759,6 +759,7 @@ dependencies = [
  "bincode",
  "crossterm",
  "libc",
+ "regex",
  "rmux-ipc",
  "rmux-os",
  "rmux-proto",

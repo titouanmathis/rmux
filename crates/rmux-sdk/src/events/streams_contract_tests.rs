@@ -122,7 +122,12 @@ where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
     let transport = TransportClient::spawn(stream);
-    PaneOutputStream::open(transport, target.into(), start).await
+    PaneOutputStream::open(
+        transport,
+        rmux_proto::PaneTargetRef::slot(target.into()),
+        start,
+    )
+    .await
 }
 
 async fn pane_line_stream_from_duplex<S>(
@@ -190,7 +195,7 @@ async fn drive_subscribe_response(
 ) {
     match read_request(stream).await {
         Request::SubscribePaneOutput(SubscribePaneOutputRequest { target, start }) => {
-            assert_eq!(&target, expected_target);
+            assert_eq!(target, expected_target.clone());
             assert_eq!(start, expected_start);
         }
         other => panic!("expected subscribe-pane-output, got {other:?}"),

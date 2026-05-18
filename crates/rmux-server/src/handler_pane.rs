@@ -4,6 +4,10 @@ use std::io;
 mod pane_attached_input;
 #[path = "handler_pane/attached_key_dispatch.rs"]
 mod pane_attached_key_dispatch;
+#[path = "handler_pane/broadcast.rs"]
+mod pane_broadcast;
+#[path = "handler_pane/by_id.rs"]
+mod pane_by_id;
 #[path = "handler_pane/display_panes.rs"]
 mod pane_display_panes;
 #[path = "handler_pane/inspection.rs"]
@@ -28,6 +32,7 @@ mod pane_send_keys;
 mod pane_snapshot;
 
 pub(super) use pane_attached_input::retain_partial_attached_control_input;
+pub(super) use pane_by_id::resolve_pane_target_ref;
 pub(super) use pane_inspection::{
     attached_status_message_for_error, command_output_from_lines, display_message_context,
     display_time,
@@ -36,6 +41,7 @@ pub(super) use pane_io_encoding::write_bracketed_pane_payload;
 use pane_io_encoding::{
     encode_key_for_target, encode_mouse_for_target, encode_tokens_for_target,
     expand_send_key_tokens, prepare_pane_input_write, write_bytes_to_target,
+    write_bytes_to_target_io,
 };
 pub(super) use pane_prompt_input::decode_prompt_input_event;
 pub(in crate::handler) use pane_snapshot::PaneSnapshotRevisionRegistry;

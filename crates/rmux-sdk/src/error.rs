@@ -8,7 +8,10 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 
+use crate::broadcast::PartialBroadcastFailure;
 use crate::diagnostics;
+use crate::wait::WaitTimeoutError;
+use crate::{PaneId, SessionName};
 
 const PROTOCOL_HINT: &str =
     "check the request and daemon state, then retry after correcting the request";
@@ -52,6 +55,52 @@ pub enum RmuxError {
     Collect {
         /// Aggregated diagnostics preserved as the source error.
         source: CollectError,
+    },
+    /// A broadcast reached at least one pane and failed for at least one pane.
+    #[non_exhaustive]
+    PartialBroadcast {
+        /// Per-pane successes and failures.
+        source: PartialBroadcastFailure,
+    },
+    /// A visible wait timed out and retained the last observed snapshot.
+    #[non_exhaustive]
+    WaitTimeout {
+        /// Timeout details and last visible snapshot.
+        source: WaitTimeoutError,
+    },
+    /// A stable pane id no longer resolves in the addressed session.
+    #[non_exhaustive]
+    PaneNotFound {
+        /// Session searched for the pane id.
+        session_name: SessionName,
+        /// Stable pane id requested by the caller.
+        pane_id: PaneId,
+    },
+    /// The pane still has a running process and replacement was not requested.
+    #[non_exhaustive]
+    ProcessStillRunning {
+        /// Server diagnostic describing the active process conflict.
+        message: String,
+    },
+    /// A daemon-side process spawn failed.
+    #[non_exhaustive]
+    SpawnFailed {
+        /// Server diagnostic describing the spawn failure.
+        message: String,
+    },
+    /// A caller supplied an invalid regular expression.
+    #[non_exhaustive]
+    InvalidRegex {
+        /// Pattern supplied by the caller.
+        pattern: String,
+        /// Regex compiler diagnostic.
+        message: String,
+    },
+    /// A daemon-side owned-session lease was not found or no longer matches.
+    #[non_exhaustive]
+    OwnedSessionLeaseLost {
+        /// Server diagnostic describing the lost lease.
+        message: String,
     },
 }
 
@@ -99,7 +148,7 @@ impl RmuxError {
                     ),
                 )
             }
-            source => Self::Protocol { source },
+            source => map_known_protocol_error(source),
         }
     }
 
@@ -118,6 +167,36 @@ impl RmuxError {
         Self::Collect { source }
     }
 
+    /// Creates a partial-broadcast error with per-pane results.
+    #[must_use]
+    pub fn partial_broadcast(source: PartialBroadcastFailure) -> Self {
+        Self::PartialBroadcast { source }
+    }
+
+    /// Creates a visible-wait timeout error.
+    #[must_use]
+    pub fn wait_timeout(source: WaitTimeoutError) -> Self {
+        Self::WaitTimeout { source }
+    }
+
+    /// Creates a typed stable-pane-missing error.
+    #[must_use]
+    pub fn pane_not_found(session_name: SessionName, pane_id: PaneId) -> Self {
+        Self::PaneNotFound {
+            session_name,
+            pane_id,
+        }
+    }
+
+    /// Creates a typed regex validation error.
+    #[must_use]
+    pub fn invalid_regex(pattern: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::InvalidRegex {
+            pattern: pattern.into(),
+            message: message.into(),
+        }
+    }
+
     /// Returns the visible recovery hint associated with this error,
     /// if one is recorded for the variant.
     ///
@@ -129,7 +208,14 @@ impl RmuxError {
             Self::Unsupported { hint, .. } => Some(hint),
             Self::Protocol { .. } => Some(PROTOCOL_HINT),
             Self::Transport { .. } => Some(TRANSPORT_HINT),
-            Self::Collect { .. } => None,
+            Self::PaneNotFound { .. }
+            | Self::ProcessStillRunning { .. }
+            | Self::SpawnFailed { .. }
+            | Self::InvalidRegex { .. }
+            | Self::OwnedSessionLeaseLost { .. }
+            | Self::Collect { .. }
+            | Self::PartialBroadcast { .. }
+            | Self::WaitTimeout { .. } => None,
         }
     }
 
@@ -140,8 +226,39 @@ impl RmuxError {
     pub fn feature(&self) -> Option<&str> {
         match self {
             Self::Unsupported { feature, .. } => Some(feature),
-            Self::Protocol { .. } | Self::Transport { .. } | Self::Collect { .. } => None,
+            Self::Protocol { .. }
+            | Self::Transport { .. }
+            | Self::Collect { .. }
+            | Self::PartialBroadcast { .. }
+            | Self::WaitTimeout { .. }
+            | Self::PaneNotFound { .. }
+            | Self::ProcessStillRunning { .. }
+            | Self::SpawnFailed { .. }
+            | Self::InvalidRegex { .. }
+            | Self::OwnedSessionLeaseLost { .. } => None,
         }
+    }
+}
+
+fn map_known_protocol_error(source: rmux_proto::RmuxError) -> RmuxError {
+    match source {
+        rmux_proto::RmuxError::PaneNotFound {
+            session_name,
+            pane_id,
+        } => RmuxError::PaneNotFound {
+            session_name,
+            pane_id,
+        },
+        rmux_proto::RmuxError::ProcessStillRunning => RmuxError::ProcessStillRunning {
+            message: rmux_proto::RmuxError::ProcessStillRunning.to_string(),
+        },
+        rmux_proto::RmuxError::SpawnFailed { message } => RmuxError::SpawnFailed { message },
+        rmux_proto::RmuxError::OwnedSessionLeaseLost { session_name } => {
+            RmuxError::OwnedSessionLeaseLost {
+                message: rmux_proto::RmuxError::OwnedSessionLeaseLost { session_name }.to_string(),
+            }
+        }
+        source => RmuxError::Protocol { source },
     }
 }
 
@@ -277,6 +394,26 @@ impl fmt::Display for RmuxError {
                 )
             }
             Self::Collect { source } => source.fmt(formatter),
+            Self::PartialBroadcast { source } => source.fmt(formatter),
+            Self::WaitTimeout { source } => source.fmt(formatter),
+            Self::PaneNotFound {
+                session_name,
+                pane_id,
+            } => write!(
+                formatter,
+                "pane id {} was not found in session {session_name}",
+                pane_id
+            ),
+            Self::ProcessStillRunning { message } => {
+                write!(formatter, "pane process still running: {message}")
+            }
+            Self::SpawnFailed { message } => write!(formatter, "pane spawn failed: {message}"),
+            Self::InvalidRegex { pattern, message } => {
+                write!(formatter, "invalid regex `{pattern}`: {message}")
+            }
+            Self::OwnedSessionLeaseLost { message } => {
+                write!(formatter, "owned session lease lost: {message}")
+            }
         }
     }
 }
@@ -288,6 +425,13 @@ impl Error for RmuxError {
             Self::Protocol { source } => Some(source),
             Self::Transport { source, .. } => Some(source),
             Self::Collect { source } => Some(source),
+            Self::PartialBroadcast { source } => Some(source),
+            Self::WaitTimeout { source } => Some(source),
+            Self::PaneNotFound { .. }
+            | Self::ProcessStillRunning { .. }
+            | Self::SpawnFailed { .. }
+            | Self::InvalidRegex { .. }
+            | Self::OwnedSessionLeaseLost { .. } => None,
         }
     }
 }

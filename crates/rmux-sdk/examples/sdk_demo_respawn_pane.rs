@@ -17,6 +17,7 @@ async fn main() -> rmux_sdk::Result<()> {
         kill: true,
         start_directory: None,
         process: ProcessSpec::default(),
+        keep_alive_on_exit: None,
     })
     .await?;
     // example:end

@@ -13,9 +13,11 @@
 //! producer, and the daemon-side ordering rules documented on
 //! [`PaneEvent`] match that producer's behaviour.
 
+pub mod render;
 pub mod streams;
 pub mod types;
 
+pub use render::{PaneRenderStream, RenderUpdate};
 pub use streams::{
     PaneLagNotice, PaneLineItem, PaneLineStream, PaneOutputChunk, PaneOutputStart,
     PaneOutputStream, PaneRecentOutput,

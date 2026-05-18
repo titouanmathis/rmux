@@ -1,8 +1,8 @@
 use rmux_core::{GridRenderOptions, OptionStore, Pane, Screen, ScreenCaptureRange, Session};
-use rmux_proto::OptionName;
 
 use super::{
-    content_pane_geometry, cursor_position_bytes, truncate_rendered_pane_line, StatusGeometry,
+    content_pane_geometry, cursor_position_bytes, styled_pane_screen, truncate_rendered_pane_line,
+    StatusGeometry,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +39,6 @@ pub(crate) struct PaneRenderSnapshot {
     title: String,
     path: String,
     mode: u32,
-    alternate_on: bool,
 }
 
 impl PaneRenderSnapshot {
@@ -55,17 +54,9 @@ impl PaneRenderSnapshot {
             return None;
         }
 
-        let mut styled_screen = screen.clone();
-        if let Some(style) = options.resolve_for_pane(
-            session.name(),
-            session.active_window_index(),
-            pane.index(),
-            OptionName::CopyModeSelectionStyle,
-        ) {
-            styled_screen.overlay_style_on_selected(style);
-        }
+        let styled_screen = styled_pane_screen(session, options, pane, screen);
 
-        let rendered = styled_screen.capture_transcript(
+        let rendered = styled_screen.capture_transcript_lines_independent(
             ScreenCaptureRange::default(),
             GridRenderOptions {
                 with_sequences: true,
@@ -76,9 +67,11 @@ impl PaneRenderSnapshot {
         );
         let utf8 = rmux_core::Utf8Config::from_options(options);
         let lines = rendered
-            .split(|byte| *byte == b'\n')
+            .into_iter()
             .take(usize::from(pane_geometry.rows()))
-            .map(|line| truncate_rendered_pane_line(line, usize::from(pane_geometry.cols()), &utf8))
+            .map(|line| {
+                truncate_rendered_pane_line(&line, usize::from(pane_geometry.cols()), &utf8)
+            })
             .collect::<Vec<_>>();
 
         let (cursor_x, cursor_y) = screen.cursor_position();
@@ -105,7 +98,6 @@ impl PaneRenderSnapshot {
             title: screen.title().to_owned(),
             path: screen.path().to_owned(),
             mode: screen.mode(),
-            alternate_on: screen.is_alternate(),
         })
     }
 
@@ -132,11 +124,12 @@ impl PaneRenderSnapshot {
                 continue;
             }
             if frame.is_empty() {
-                frame.extend_from_slice(b"\x1b[s\x1b[0m");
+                frame.extend_from_slice(b"\x1b[s");
             }
             frame.extend_from_slice(
                 cursor_position_bytes(next.y.saturating_add(row as u16), next.x).as_slice(),
             );
+            frame.extend_from_slice(b"\x1b[0m");
             frame.extend_from_slice(next_line);
         }
 
@@ -242,5 +235,54 @@ mod tests {
         assert!(text.contains("\u{1b}[2;1H"));
         assert!(text.contains("def"));
         assert!(text.ends_with("\u{1b}[2;4H"));
+    }
+
+    #[test]
+    fn pane_delta_repaints_blank_lines_when_background_changes() {
+        let session = Session::new(session_name("alpha"), TerminalSize { cols: 10, rows: 4 });
+        let pane = session.window().active_pane().expect("active pane");
+        let options = OptionStore::new();
+        let before = screen_with(b"alpha\r\n          ");
+        let after = screen_with(b"\x1b[48;2;20;20;20malpha\r\n          ");
+        let before = PaneRenderSnapshot::capture(&session, &options, pane, &before)
+            .expect("before snapshot");
+        let after =
+            PaneRenderSnapshot::capture(&session, &options, pane, &after).expect("after snapshot");
+
+        let PaneRenderDelta::Incremental(delta) = before.diff_to(&after) else {
+            panic!("style-only row changes should repaint incrementally");
+        };
+        let text = String::from_utf8(delta.frame().to_vec()).expect("delta is utf8");
+
+        assert!(text.contains("\u{1b}[1;1H"));
+        assert!(text.contains("\u{1b}[48;2;20;20;20m"));
+        assert!(text.contains("\u{1b}[2;1H"));
+    }
+
+    #[test]
+    fn pane_delta_resets_each_repainted_row_independently() {
+        let session = Session::new(session_name("alpha"), TerminalSize { cols: 10, rows: 4 });
+        let pane = session.window().active_pane().expect("active pane");
+        let options = OptionStore::new();
+        let before = screen_with(b"0123456789\r\nbase");
+        let after = screen_with(b"\x1b[48;2;20;20;20mabcdefghij\r\n\x1b[0mnext");
+        let before = PaneRenderSnapshot::capture(&session, &options, pane, &before)
+            .expect("before snapshot");
+        let after =
+            PaneRenderSnapshot::capture(&session, &options, pane, &after).expect("after snapshot");
+
+        let PaneRenderDelta::Incremental(delta) = before.diff_to(&after) else {
+            panic!("changed rows should repaint incrementally");
+        };
+        let text = String::from_utf8(delta.frame().to_vec()).expect("delta is utf8");
+
+        assert!(
+            text.contains("\u{1b}[1;1H\u{1b}[0m\u{1b}[48;2;20;20;20mabcdefghij"),
+            "{text:?}"
+        );
+        assert!(
+            text.contains("\u{1b}[2;1H\u{1b}[0mnext"),
+            "the second row must not inherit row one's background: {text:?}"
+        );
     }
 }

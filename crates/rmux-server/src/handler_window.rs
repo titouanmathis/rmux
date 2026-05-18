@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 
 use rmux_core::{LifecycleEvent, PaneId};
-use rmux_proto::{ErrorResponse, HookName, PaneTarget, Response, ScopeSelector, Target};
+use rmux_proto::{
+    ErrorResponse, HookName, PaneTarget, ProcessCommand, Response, ScopeSelector, Target,
+};
 
 use super::RequestHandler;
 use crate::hook_runtime::PendingInlineHookFormat;
@@ -27,6 +29,7 @@ impl RequestHandler {
         let environment_overrides = request.environment;
         let start_directory = request.start_directory;
         let command = request.command;
+        let process_command = ProcessCommand::from_legacy_command(command.as_deref());
         let socket_path = self.socket_path();
         let response = {
             let mut state = self.state.lock().await;
@@ -35,7 +38,7 @@ impl RequestHandler {
                 detached: request.detached,
                 spawn: WindowSpawnOptions {
                     start_directory: start_directory.as_deref(),
-                    command: command.as_deref(),
+                    command: process_command.as_ref(),
                     socket_path: &socket_path,
                     environment_overrides: environment_overrides.as_deref(),
                     pane_alert_callback: Some(self.pane_alert_callback()),
@@ -508,6 +511,7 @@ impl RequestHandler {
     ) -> Response {
         let session_name = request.target.session_name().clone();
         let socket_path = self.socket_path();
+        let process_command = ProcessCommand::from_legacy_command(request.command.as_deref());
         let response = {
             let mut state = self.state.lock().await;
             match state.respawn_window(
@@ -516,7 +520,7 @@ impl RequestHandler {
                     kill: request.kill,
                     spawn: WindowSpawnOptions {
                         start_directory: request.start_directory.as_deref(),
-                        command: request.command.as_deref(),
+                        command: process_command.as_ref(),
                         socket_path: &socket_path,
                         environment_overrides: request.environment.as_deref(),
                         pane_alert_callback: Some(self.pane_alert_callback()),

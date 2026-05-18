@@ -10,7 +10,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 pub use crate::identity::SessionName;
-use crate::RmuxError;
+use crate::{PaneId, RmuxError};
 pub use rmux_types::TerminalSize;
 
 #[path = "types/hooks.rs"]
@@ -20,6 +20,56 @@ mod options;
 
 pub use hooks::{HookLifecycle, HookName};
 pub use options::{OptionName, SetOptionMode};
+
+/// Explicit process launch mode for daemon-owned pane processes.
+///
+/// This is distinct from the legacy `command: Option<Vec<String>>` fields on
+/// some request DTOs. Legacy command fields preserve tmux-compatible behavior
+/// where a single string runs through `$SHELL -c`; this enum records caller
+/// intent directly so SDK `spawn(argv)` can remain argv-based even for a
+/// single program name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ProcessCommand {
+    /// Execute the program directly with the supplied argv vector.
+    Argv(Vec<String>),
+    /// Execute command text through the configured shell.
+    Shell(String),
+}
+
+impl ProcessCommand {
+    /// Converts a legacy command vector into the historical tmux-compatible
+    /// launch mode.
+    #[must_use]
+    pub fn from_legacy_command(command: Option<&[String]>) -> Option<Self> {
+        match command {
+            Some([single]) => Some(Self::Shell(single.clone())),
+            Some(argv) if !argv.is_empty() => Some(Self::Argv(argv.to_vec())),
+            _ => None,
+        }
+    }
+
+    /// Returns a redaction/display-friendly command vector.
+    ///
+    /// Shell commands are represented as a one-element vector to preserve the
+    /// existing `pane_start_command` encoding shape.
+    #[must_use]
+    pub fn display_command(&self) -> Vec<String> {
+        match self {
+            Self::Argv(argv) => argv.clone(),
+            Self::Shell(command) => vec![command.clone()],
+        }
+    }
+
+    /// Returns true when the command contains no executable work.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Argv(argv) => argv.is_empty() || argv.first().is_some_and(String::is_empty),
+            Self::Shell(command) => command.is_empty(),
+        }
+    }
+}
 
 /// Stable identifier for one pane-output subscription on a live server
 /// connection.
@@ -255,6 +305,65 @@ impl fmt::Display for PaneTarget {
             "{}:{}.{}",
             self.session_name, self.window_index, self.pane_index
         )
+    }
+}
+
+/// Pane selector for SDK operations that can address either a display slot
+/// or a stable pane identity.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PaneTargetRef {
+    /// Existing slot-based selector.
+    Slot(PaneTarget),
+    /// Stable pane id scoped by session name.
+    Id {
+        /// Exact session name component.
+        session_name: SessionName,
+        /// Stable pane identity within one daemon lifetime.
+        pane_id: PaneId,
+    },
+}
+
+impl PaneTargetRef {
+    /// Creates a selector for an existing slot target.
+    #[must_use]
+    pub const fn slot(target: PaneTarget) -> Self {
+        Self::Slot(target)
+    }
+
+    /// Creates a selector for a stable pane id in a session.
+    #[must_use]
+    pub const fn by_id(session_name: SessionName, pane_id: PaneId) -> Self {
+        Self::Id {
+            session_name,
+            pane_id,
+        }
+    }
+
+    /// Returns the session name component.
+    #[must_use]
+    pub const fn session_name(&self) -> &SessionName {
+        match self {
+            Self::Slot(target) => target.session_name(),
+            Self::Id { session_name, .. } => session_name,
+        }
+    }
+}
+
+impl From<PaneTarget> for PaneTargetRef {
+    fn from(value: PaneTarget) -> Self {
+        Self::Slot(value)
+    }
+}
+
+impl fmt::Display for PaneTargetRef {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Slot(target) => target.fmt(formatter),
+            Self::Id {
+                session_name,
+                pane_id,
+            } => write!(formatter, "{session_name}:{pane_id}"),
+        }
     }
 }
 

@@ -1,5 +1,8 @@
 //! Daemon-backed byte waits and snapshot-polled text wait helpers.
 
+#[path = "wait/visible.rs"]
+mod visible;
+
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
@@ -8,12 +11,15 @@ use std::time::Duration;
 
 use rmux_proto::{
     CancelSdkWaitRequest, PaneOutputSubscriptionStart, Request, Response, RmuxError as ProtoError,
-    SdkWaitForOutputRequest, SdkWaitId, SdkWaitOutcome,
+    SdkWaitForOutputRefRequest, SdkWaitForOutputRequest, SdkWaitId, SdkWaitOutcome,
+    CAPABILITY_SDK_PANE_BY_ID,
 };
 
 use crate::handles::{connect_transport_to_endpoint, Pane};
 use crate::transport::{DropGuard, PendingResponse};
 use crate::{Result, RmuxError};
+
+pub use visible::{VisibleTextExpectation, VisibleTextWait, WaitTimeoutError};
 
 const WAIT_FOR_BYTES_OPERATION: &str = "wait for pane output bytes";
 const WAIT_FOR_TEXT_OPERATION: &str = "wait for pane snapshot text";
@@ -184,16 +190,28 @@ async fn wait_for_bytes_without_timeout(
     let cancel_client = connect_transport_to_endpoint(pane.endpoint(), timeout).await?;
     let mut cancel_guard = DropGuard::best_effort(cancel_client, cancel_request);
 
-    let response = pane
-        .transport()
-        .request(Request::SdkWaitForOutput(SdkWaitForOutputRequest {
-            owner_id,
-            wait_id,
-            target: pane.target().into(),
-            bytes,
-            start: PaneOutputSubscriptionStart::Now,
-        }))
-        .await;
+    let response = if pane.is_stable_id() {
+        crate::capabilities::require(pane.transport(), &[CAPABILITY_SDK_PANE_BY_ID]).await?;
+        pane.transport()
+            .request(Request::SdkWaitForOutputRef(SdkWaitForOutputRefRequest {
+                owner_id,
+                wait_id,
+                target: pane.proto_target_ref(),
+                bytes,
+                start: PaneOutputSubscriptionStart::Now,
+            }))
+            .await
+    } else {
+        pane.transport()
+            .request(Request::SdkWaitForOutput(SdkWaitForOutputRequest {
+                owner_id,
+                wait_id,
+                target: pane.target().into(),
+                bytes,
+                start: PaneOutputSubscriptionStart::Now,
+            }))
+            .await
+    };
 
     let response = match response {
         Ok(response) => response,
@@ -227,13 +245,7 @@ async fn arm_sdk_wait(
     let response = with_wait_timeout(
         operation,
         timeout,
-        wait_client.armed_request(Request::SdkWaitForOutput(SdkWaitForOutputRequest {
-            owner_id,
-            wait_id,
-            target: pane.target().into(),
-            bytes,
-            start: PaneOutputSubscriptionStart::Now,
-        })),
+        wait_client.armed_request(sdk_wait_request_for_pane(pane, owner_id, wait_id, bytes).await?),
     )
     .await?;
 
@@ -244,6 +256,32 @@ async fn arm_sdk_wait(
         operation,
         timeout,
     ))
+}
+
+async fn sdk_wait_request_for_pane(
+    pane: &Pane,
+    owner_id: rmux_proto::SdkWaitOwnerId,
+    wait_id: SdkWaitId,
+    bytes: Vec<u8>,
+) -> Result<Request> {
+    if pane.is_stable_id() {
+        crate::capabilities::require(pane.transport(), &[CAPABILITY_SDK_PANE_BY_ID]).await?;
+        return Ok(Request::SdkWaitForOutputRef(SdkWaitForOutputRefRequest {
+            owner_id,
+            wait_id,
+            target: pane.proto_target_ref(),
+            bytes,
+            start: PaneOutputSubscriptionStart::Now,
+        }));
+    }
+
+    Ok(Request::SdkWaitForOutput(SdkWaitForOutputRequest {
+        owner_id,
+        wait_id,
+        target: pane.target().into(),
+        bytes,
+        start: PaneOutputSubscriptionStart::Now,
+    }))
 }
 
 async fn wait_for_text_without_timeout(pane: &Pane, text: String) -> Result<()> {

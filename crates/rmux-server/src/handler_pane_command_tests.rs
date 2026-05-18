@@ -242,6 +242,7 @@ async fn sticky_lifecycle_state_is_id_keyed_and_redacts_spawn_env() {
             print_session_info: false,
             print_format: None,
             command: Some(vec![initial_command.clone()]),
+            process_command: None,
         }))
         .await;
     assert!(matches!(created, rmux_proto::Response::NewSession(_)));
@@ -291,6 +292,9 @@ async fn sticky_lifecycle_state_is_id_keyed_and_redacts_spawn_env() {
             before: false,
             environment: Some(vec![split_secret.clone()]),
             command: Some(vec![split_command.clone()]),
+            process_command: None,
+            start_directory: None,
+            keep_alive_on_exit: None,
         }))
         .await;
     let split_target = match split {
@@ -397,6 +401,7 @@ async fn sticky_lifecycle_state_is_id_keyed_and_redacts_spawn_env() {
             start_directory: None,
             environment: None,
             command: Some(vec!["exit 7".to_owned()]),
+            process_command: None,
         }))
         .await;
     assert!(matches!(dead_respawn, rmux_proto::Response::RespawnPane(_)));
@@ -411,6 +416,7 @@ async fn sticky_lifecycle_state_is_id_keyed_and_redacts_spawn_env() {
             start_directory: Some(respawn_cwd.clone()),
             environment: Some(vec![respawn_secret.clone()]),
             command: Some(vec![respawn_command.clone()]),
+            process_command: None,
         }))
         .await;
     assert!(matches!(respawned, rmux_proto::Response::RespawnPane(_)));
@@ -495,6 +501,7 @@ async fn pane_output_sequence_advances_when_transcript_changes() {
             print_session_info: false,
             print_format: None,
             command: Some(vec![pipe_discard_command()]),
+            process_command: None,
         }))
         .await;
     assert!(matches!(created, rmux_proto::Response::NewSession(_)));
@@ -742,6 +749,7 @@ async fn pipe_pane_rejects_dead_panes() {
             start_directory: None,
             environment: None,
             command: Some(vec!["exit 0".to_owned()]),
+            process_command: None,
         }))
         .await;
     assert!(matches!(respawned, rmux_proto::Response::RespawnPane(_)));
@@ -776,6 +784,7 @@ async fn respawn_pane_rejects_active_pane_without_kill_flag() {
             start_directory: None,
             environment: None,
             command: None,
+            process_command: None,
         }))
         .await;
 
@@ -801,6 +810,7 @@ async fn respawn_pane_with_kill_flag_applies_directory_environment_and_command()
             start_directory: Some(cwd.clone()),
             environment: Some(vec!["RMUX_RESPAWN=ready".to_owned()]),
             command: Some(vec![respawn_probe_command(&output)]),
+            process_command: None,
         }))
         .await;
 
@@ -844,6 +854,7 @@ async fn respawn_pane_with_kill_flag_emits_replaced_pane_exit() {
             start_directory: None,
             environment: None,
             command: Some(vec![pipe_discard_command()]),
+            process_command: None,
         }))
         .await;
     assert!(matches!(response, rmux_proto::Response::RespawnPane(_)));
@@ -928,6 +939,7 @@ async fn respawn_pane_preserves_id_and_clears_parser_state_before_new_output() {
             start_directory: None,
             environment: None,
             command: Some(vec![pipe_discard_command()]),
+            process_command: None,
         }))
         .await;
     assert!(matches!(response, rmux_proto::Response::RespawnPane(_)));
@@ -1283,6 +1295,7 @@ async fn respawn_pane_dead_pane_succeeds_without_kill_flag() {
             start_directory: None,
             environment: None,
             command: Some(vec!["exit 0".to_owned()]),
+            process_command: None,
         }))
         .await;
     assert!(matches!(respawned, rmux_proto::Response::RespawnPane(_)));
@@ -1295,6 +1308,7 @@ async fn respawn_pane_dead_pane_succeeds_without_kill_flag() {
             start_directory: None,
             environment: None,
             command: None,
+            process_command: None,
         }))
         .await;
 
@@ -1351,6 +1365,7 @@ async fn remain_on_exit_keeps_the_existing_window_name() {
             start_directory: None,
             environment: None,
             command: Some(vec!["exit 0".to_owned()]),
+            process_command: None,
         }))
         .await;
     assert!(matches!(response, rmux_proto::Response::RespawnPane(_)));
@@ -1425,6 +1440,7 @@ async fn remain_on_exit_auto_named_window_gets_tmux_dead_suffix_when_unattached(
             start_directory: None,
             environment: None,
             command: Some(vec!["exit 0".to_owned()]),
+            process_command: None,
         }))
         .await;
     assert!(matches!(response, rmux_proto::Response::RespawnPane(_)));
@@ -1609,6 +1625,7 @@ async fn pane_snapshot_returns_live_screen_built_via_terminal_parser() {
             print_session_info: false,
             print_format: None,
             command: Some(vec![pipe_discard_command()]),
+            process_command: None,
         }))
         .await;
     assert!(matches!(created, rmux_proto::Response::NewSession(_)));
@@ -1737,6 +1754,7 @@ async fn pane_snapshot_folds_invalid_utf8_through_parser_not_raw_bytes() {
             print_session_info: false,
             print_format: None,
             command: Some(vec![pipe_discard_command()]),
+            process_command: None,
         }))
         .await;
     assert!(matches!(created, rmux_proto::Response::NewSession(_)));
@@ -1821,6 +1839,7 @@ async fn pane_snapshot_revision_changes_after_clear_history() {
             print_session_info: false,
             print_format: None,
             command: Some(vec![pipe_discard_command()]),
+            process_command: None,
         }))
         .await;
     assert!(matches!(created, rmux_proto::Response::NewSession(_)));

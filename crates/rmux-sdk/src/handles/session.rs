@@ -4,7 +4,7 @@ use std::fmt;
 use std::time::Duration;
 
 use crate::transport::TransportClient;
-use crate::{PaneRef, Result, RmuxEndpoint, RmuxError, SessionName, WindowRef};
+use crate::{PaneId, PaneRef, Result, RmuxEndpoint, RmuxError, SessionName, WindowRef};
 use rmux_proto::{HasSessionRequest, KillSessionRequest, ListSessionsRequest, Request, Response};
 
 use super::{Pane, Window};
@@ -58,6 +58,10 @@ impl Session {
     #[must_use]
     pub const fn configured_default_timeout(&self) -> Option<Duration> {
         self.default_timeout
+    }
+
+    pub(crate) const fn transport(&self) -> &TransportClient {
+        &self.transport
     }
 
     /// Returns whether the ensure operation created the session.
@@ -128,6 +132,38 @@ impl Session {
         )
     }
 
+    /// Returns a pane handle addressed by stable pane id.
+    ///
+    /// The returned [`Pane`] has the same public type as a slot-based pane,
+    /// but input, resize, lifecycle, title, and snapshot operations use the
+    /// daemon's stable pane-id targeting path. `PaneId` is stable only for
+    /// one daemon lifetime; callers that persist ids across reconnects must
+    /// re-validate them.
+    pub async fn pane_by_id(&self, pane_id: PaneId) -> Result<Pane> {
+        let target = super::pane::resolve_pane_ref_for_id(&self.transport, &self.name, pane_id)
+            .await?
+            .ok_or_else(|| pane_not_found(&self.name, pane_id))?;
+        Ok(Pane::new_by_id(
+            target,
+            pane_id,
+            self.endpoint.clone(),
+            self.default_timeout,
+            self.transport.clone(),
+        ))
+    }
+
+    /// Starts a declarative SDK layout builder for this session.
+    ///
+    /// v0.1.3 layouts are SDK-side composition over the existing pane split,
+    /// spawn, title, and daemon spread-layout primitives. They do not add a
+    /// daemon-native transaction; if an intermediate split or spawn fails,
+    /// already-created panes remain visible for inspection and cleanup by the
+    /// caller.
+    #[must_use]
+    pub fn layout(&self) -> crate::SessionLayoutBuilder<'_> {
+        crate::SessionLayoutBuilder::new(self)
+    }
+
     /// Destroys this session through the daemon.
     ///
     /// The returned boolean mirrors the daemon response: `true` means a
@@ -135,6 +171,13 @@ impl Session {
     pub async fn kill(&self) -> Result<bool> {
         kill_session(&self.transport, self.name.clone()).await
     }
+}
+
+fn pane_not_found(session_name: &SessionName, pane_id: PaneId) -> RmuxError {
+    RmuxError::protocol(rmux_proto::RmuxError::pane_not_found(
+        session_name.clone(),
+        pane_id,
+    ))
 }
 
 impl fmt::Debug for Session {

@@ -310,6 +310,7 @@ impl RequestHandler {
                 output,
             } => {
                 self.retain_removed_pane_output(&event, &target, &output);
+                self.remove_session_leases(std::slice::from_ref(&session_name));
                 output.ensure_eof(event.generation).await;
                 self.forget_pane_snapshot_coalescers(&removed_pane_ids);
                 self.cleanup_exited_pane_output_subscription(&event).await;

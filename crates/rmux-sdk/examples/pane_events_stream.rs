@@ -15,38 +15,36 @@
 use std::time::Duration;
 
 use rmux_sdk::{
-    EnsureSession, PaneLineItem, PaneOutputChunk, PaneOutputStart, ProcessSpec, Result, Rmux,
+    EnsureSession, PaneLineItem, PaneOutputChunk, PaneOutputStart, Result, Rmux, RmuxError,
     TerminalSizeSpec,
 };
 
 const MAX_BYTE_CHUNKS: usize = 8;
-const MAX_LINES: usize = 16;
+const EXPECTED_LINES: usize = 4;
 // Hard upper bound on stream events the example will consume before
 // returning. Non-byte events (lag notices, future non-exhaustive
 // variants) advance this counter so a daemon stuck emitting only lag
 // notices cannot keep the example blocked indefinitely.
 const MAX_STREAM_EVENTS: usize = 64;
+const STREAM_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let rmux = Rmux::builder()
-        .default_endpoint()
         .default_timeout(Duration::from_secs(30))
-        .build();
+        .connect_or_start()
+        .await?;
 
     let session = rmux
         .ensure_session(
-            EnsureSession::try_named("rmux-sdk-pane-events-stream")?
-                .create_or_reuse()
-                .size(TerminalSizeSpec::new(80, 24))
-                .process(ProcessSpec {
-                    command: Some(vec![
-                        "sh".to_owned(),
-                        "-c".to_owned(),
-                        "for i in 1 2 3 4; do printf 'tick %d\\n' \"$i\"; done".to_owned(),
-                    ]),
-                    environment: None,
-                }),
+            EnsureSession::try_named(format!(
+                "rmux-sdk-pane-events-stream-{}",
+                std::process::id()
+            ))?
+            .create_only()
+            .detached(true)
+            .size(TerminalSizeSpec::new(80, 24))
+            .argv(shell_command()),
         )
         .await?;
 
@@ -56,15 +54,26 @@ async fn main() -> Result<()> {
     // appended after subscription. `Oldest` would replay the daemon's
     // retained backlog before live output.
     let mut bytes = pane.output_stream_starting_at(PaneOutputStart::Now).await?;
+    pane.send_text(events_input()).await?;
     let mut total_bytes = 0_usize;
     let mut byte_chunks = 0_usize;
     let mut byte_events = 0_usize;
-    while byte_chunks < MAX_BYTE_CHUNKS && byte_events < MAX_STREAM_EVENTS {
+    let mut retained = Vec::new();
+    while byte_chunks < MAX_BYTE_CHUNKS
+        && byte_events < MAX_STREAM_EVENTS
+        && !contains_tick_four(&retained)
+    {
         byte_events += 1;
-        match bytes.next().await? {
+        let next = match tokio::time::timeout(STREAM_TIMEOUT, bytes.next()).await {
+            Ok(next) => next?,
+            Err(_) if total_bytes > 0 => break,
+            Err(_) => return Err(timeout_error("raw pane output")),
+        };
+        match next {
             Some(PaneOutputChunk::Bytes { sequence, bytes }) => {
                 total_bytes += bytes.len();
                 byte_chunks += 1;
+                retained.extend_from_slice(&bytes);
                 println!("byte chunk seq={} len={}", sequence, bytes.len());
             }
             Some(PaneOutputChunk::Lag(notice)) => {
@@ -88,14 +97,18 @@ async fn main() -> Result<()> {
     // UTF-8 lines split on `\n`. Invalid byte sequences are replaced with
     // the Unicode replacement character; partial trailing lines stay
     // buffered until the next LF arrives.
-    let mut lines = pane.line_stream().await?;
+    let mut lines = pane
+        .line_stream_starting_at(PaneOutputStart::Oldest)
+        .await?;
     let mut delivered = 0_usize;
     let mut line_events = 0_usize;
-    while delivered < MAX_LINES && line_events < MAX_STREAM_EVENTS {
+    while delivered < EXPECTED_LINES && line_events < MAX_STREAM_EVENTS {
         line_events += 1;
-        match lines.next().await? {
+        match timed(lines.next(), "line pane output").await? {
             Some(PaneLineItem::Line { text }) => {
-                delivered += 1;
+                if text.contains("tick") && !text.contains("for /L") && !text.contains("for i") {
+                    delivered += 1;
+                }
                 println!("line: {text}");
             }
             Some(PaneLineItem::Lag(notice)) => {
@@ -112,6 +125,44 @@ async fn main() -> Result<()> {
             None => break,
         }
     }
+    if delivered < EXPECTED_LINES {
+        return Err(timeout_error("line pane output"));
+    }
 
+    session.kill().await?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn shell_command() -> Vec<String> {
+    vec!["sh".to_owned()]
+}
+
+#[cfg(windows)]
+fn shell_command() -> Vec<String> {
+    vec!["cmd.exe".to_owned(), "/Q".to_owned(), "/K".to_owned()]
+}
+
+#[cfg(unix)]
+fn events_input() -> &'static str {
+    "for i in 1 2 3 4; do printf 'tick %d\\n' \"$i\"; done\n"
+}
+
+#[cfg(windows)]
+fn events_input() -> &'static str {
+    "for /L %i in (1,1,4) do @echo tick %i\r"
+}
+
+fn contains_tick_four(bytes: &[u8]) -> bool {
+    String::from_utf8_lossy(bytes).contains("tick 4")
+}
+
+fn timeout_error(label: &str) -> RmuxError {
+    RmuxError::unsupported("example.stream_timeout", label.to_owned())
+}
+
+async fn timed<T>(future: impl std::future::Future<Output = Result<T>>, label: &str) -> Result<T> {
+    tokio::time::timeout(STREAM_TIMEOUT, future)
+        .await
+        .map_err(|_| timeout_error(label))?
 }

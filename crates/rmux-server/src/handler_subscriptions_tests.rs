@@ -4,8 +4,8 @@ use rmux_core::events::{
     OutputCursor, OutputCursorItem, OutputRing, PaneOutputSubscriptionKey, SubscriptionLimits,
 };
 use rmux_proto::{
-    PaneId, PaneOutputCursorRequest, PaneOutputSubscriptionStart, PaneTarget, Response, RmuxError,
-    SessionName, SubscribePaneOutputRequest,
+    PaneId, PaneOutputCursorRequest, PaneOutputSubscriptionStart, PaneTarget, PaneTargetRef,
+    Response, RmuxError, SessionName, SubscribePaneOutputRefRequest, SubscribePaneOutputRequest,
 };
 
 use crate::daemon::ShutdownHandle;
@@ -415,6 +415,105 @@ async fn oldest_subscription_can_attach_to_retained_exited_pane_output() {
 }
 
 #[tokio::test]
+async fn oldest_subscription_by_id_can_attach_to_retained_exited_pane_output() {
+    let handler = RequestHandler::new();
+    let connection_id = 56;
+    let session_name = SessionName::new("gone-by-id").expect("valid session name");
+    let pane_id = PaneId::new(34);
+    let target = PaneTarget::with_window(session_name.clone(), 0, 0);
+    let pane = PaneOutputSubscriptionKey::new(session_name.clone(), pane_id);
+    let sender = pane_output_channel_with_limits(8, 1024);
+    sender.send(b"retained id start".to_vec());
+    sender.send(b"retained id tail".to_vec());
+    sender.send(Vec::new());
+
+    handler.retain_exited_pane_output(target.clone(), pane, sender);
+
+    let response = handler
+        .handle_subscribe_pane_output_ref(
+            connection_id,
+            SubscribePaneOutputRefRequest {
+                target: PaneTargetRef::by_id(session_name, pane_id),
+                start: PaneOutputSubscriptionStart::Oldest,
+            },
+        )
+        .await;
+    let Response::SubscribePaneOutput(subscribe) = response else {
+        panic!("retained exited output should accept an Oldest by-id subscription");
+    };
+    assert_eq!(subscribe.target, target);
+    assert_eq!(subscribe.pane_id, pane_id);
+
+    let response = handler
+        .handle_pane_output_cursor(
+            connection_id,
+            PaneOutputCursorRequest {
+                subscription_id: subscribe.subscription_id,
+                max_events: Some(8),
+            },
+        )
+        .await;
+    let Response::PaneOutputCursor(cursor) = response else {
+        panic!("retained by-id subscription should return a cursor response");
+    };
+    assert_eq!(cursor.events.len(), 3);
+    assert_eq!(cursor.events[0].bytes, b"retained id start");
+    assert_eq!(cursor.events[1].bytes, b"retained id tail");
+    assert!(cursor.events[2].bytes.is_empty());
+}
+
+#[tokio::test]
+async fn retained_exited_output_by_id_does_not_follow_reused_slot() {
+    let handler = RequestHandler::new();
+    let session_name = SessionName::new("reused-slot").expect("valid session name");
+    let target = PaneTarget::with_window(session_name.clone(), 0, 0);
+    let old_pane_id = PaneId::new(34);
+    let new_pane_id = PaneId::new(35);
+    let old_pane = PaneOutputSubscriptionKey::new(session_name.clone(), old_pane_id);
+    let new_pane = PaneOutputSubscriptionKey::new(session_name.clone(), new_pane_id);
+    let old_sender = pane_output_channel_with_limits(8, 1024);
+    let new_sender = pane_output_channel_with_limits(8, 1024);
+    old_sender.send(b"old retained output".to_vec());
+    old_sender.send(Vec::new());
+    new_sender.send(b"new retained output".to_vec());
+    new_sender.send(Vec::new());
+
+    handler.retain_exited_pane_output(target.clone(), old_pane, old_sender);
+    handler.retain_exited_pane_output(target.clone(), new_pane, new_sender);
+
+    assert_retained_output_by_id(
+        &handler,
+        57,
+        session_name.clone(),
+        old_pane_id,
+        b"old retained output",
+    )
+    .await;
+    assert_retained_output_by_id(
+        &handler,
+        58,
+        session_name.clone(),
+        new_pane_id,
+        b"new retained output",
+    )
+    .await;
+
+    let response = handler
+        .handle_subscribe_pane_output(
+            59,
+            SubscribePaneOutputRequest {
+                target,
+                start: PaneOutputSubscriptionStart::Oldest,
+            },
+        )
+        .await;
+    let Response::SubscribePaneOutput(subscribe) = response else {
+        panic!("retained slot subscription should resolve to newest slot occupant");
+    };
+    assert_eq!(subscribe.pane_id, new_pane_id);
+}
+
+#[tokio::test]
 async fn kill_server_does_not_wait_for_retained_exited_pane_output() {
     let handler = RequestHandler::new();
     let (shutdown_handle, mut shutdown_rx) = ShutdownHandle::new();
@@ -438,4 +537,39 @@ async fn kill_server_does_not_wait_for_retained_exited_pane_output() {
         .await
         .expect("shutdown should be requested immediately")
         .expect("shutdown receiver should complete cleanly");
+}
+
+async fn assert_retained_output_by_id(
+    handler: &RequestHandler,
+    connection_id: u64,
+    session_name: SessionName,
+    pane_id: PaneId,
+    expected: &[u8],
+) {
+    let response = handler
+        .handle_subscribe_pane_output_ref(
+            connection_id,
+            SubscribePaneOutputRefRequest {
+                target: PaneTargetRef::by_id(session_name, pane_id),
+                start: PaneOutputSubscriptionStart::Oldest,
+            },
+        )
+        .await;
+    let Response::SubscribePaneOutput(subscribe) = response else {
+        panic!("retained by-id subscription should resolve");
+    };
+
+    let response = handler
+        .handle_pane_output_cursor(
+            connection_id,
+            PaneOutputCursorRequest {
+                subscription_id: subscribe.subscription_id,
+                max_events: Some(8),
+            },
+        )
+        .await;
+    let Response::PaneOutputCursor(cursor) = response else {
+        panic!("retained by-id subscription should return a cursor response");
+    };
+    assert_eq!(cursor.events[0].bytes, expected);
 }

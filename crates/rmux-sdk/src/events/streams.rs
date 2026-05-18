@@ -71,7 +71,8 @@ use std::time::Duration;
 use rmux_proto::{
     PaneOutputCursorRequest, PaneOutputEvent, PaneOutputLagNotice as ProtoLagNotice,
     PaneOutputSubscriptionId, PaneOutputSubscriptionStart, PaneRecentOutput as ProtoRecentOutput,
-    PaneTarget, Request, Response, SubscribePaneOutputRequest, UnsubscribePaneOutputRequest,
+    PaneTargetRef, Request, Response, SubscribePaneOutputRefRequest, SubscribePaneOutputRequest,
+    UnsubscribePaneOutputRequest, CAPABILITY_SDK_PANE_BY_ID,
 };
 
 use crate::handles::session::unexpected_response;
@@ -241,15 +242,28 @@ struct PaneSubscription {
 impl PaneOutputStream {
     pub(crate) async fn open(
         transport: TransportClient,
-        target: PaneTarget,
+        target: PaneTargetRef,
         start: PaneOutputStart,
     ) -> Result<Self> {
-        let response = transport
-            .request(Request::SubscribePaneOutput(SubscribePaneOutputRequest {
-                target,
-                start: start.into_proto(),
-            }))
-            .await?;
+        let start = start.into_proto();
+        let response = match target {
+            PaneTargetRef::Slot(target) => {
+                transport
+                    .request(Request::SubscribePaneOutput(SubscribePaneOutputRequest {
+                        target,
+                        start,
+                    }))
+                    .await?
+            }
+            PaneTargetRef::Id { .. } => {
+                crate::capabilities::require(&transport, &[CAPABILITY_SDK_PANE_BY_ID]).await?;
+                transport
+                    .request(Request::SubscribePaneOutputRef(
+                        SubscribePaneOutputRefRequest { target, start },
+                    ))
+                    .await?
+            }
+        };
 
         let subscription_id = match response {
             Response::SubscribePaneOutput(response) => response.subscription_id,

@@ -129,6 +129,25 @@ fn scrollback_lines_are_captured_after_crlf_output() {
 }
 
 #[test]
+fn independent_transcript_lines_repeat_carried_sgr_state() {
+    let mut screen = new_screen(8, 2, 10);
+    parse(&mut screen, b"\x1b[48;2;20;20;20mone\r\n   ");
+
+    let lines = screen.capture_transcript_lines_independent(
+        full_range(),
+        GridRenderOptions {
+            with_sequences: true,
+            include_empty_cells: true,
+            trim_spaces: false,
+            ..GridRenderOptions::default()
+        },
+    );
+
+    assert!(lines[0].starts_with(b"\x1b[48;2;20;20;20m"));
+    assert!(lines[1].starts_with(b"\x1b[48;2;20;20;20m"));
+}
+
+#[test]
 fn alternate_screen_does_not_append_to_history() {
     let mut screen = new_screen(8, 2, 10);
     parse(&mut screen, b"main\n");
@@ -201,6 +220,22 @@ fn osc_8_links_are_applied_to_cells() {
     assert_ne!(line.cell(0).expect("x cell").link(), 0);
     assert_ne!(line.cell(1).expect("y cell").link(), 0);
     assert_eq!(line.cell(2).expect("z cell").link(), 0);
+}
+
+#[test]
+fn default_cell_style_overlay_preserves_application_backgrounds() {
+    let mut screen = new_screen(4, 1, 10);
+    parse(&mut screen, b"\x1b[44mB\x1b[0mD");
+
+    screen.overlay_style_on_default_cells("fg=green,bg=black");
+
+    let line = screen.grid().visible_line(0).expect("visible line");
+    assert_eq!(line.cell(0).expect("explicit cell").fg(), 2);
+    assert_eq!(line.cell(0).expect("explicit cell").bg(), 4);
+    assert_eq!(line.cell(1).expect("default text").fg(), 2);
+    assert_eq!(line.cell(1).expect("default text").bg(), 0);
+    assert_eq!(line.cell(2).expect("default blank").fg(), 2);
+    assert_eq!(line.cell(2).expect("default blank").bg(), 0);
 }
 
 #[test]

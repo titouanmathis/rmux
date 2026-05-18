@@ -7,7 +7,9 @@
 use crate::handles::session::unexpected_response;
 use crate::handles::split::SplitDirection;
 use crate::transport::TransportClient;
-use crate::{PaneRef, Result};
+use std::path::PathBuf;
+
+use crate::{PaneRef, ProcessSpec, Result};
 use rmux_proto::{Request, Response, SplitWindowExtRequest, SplitWindowTarget};
 
 /// Issues the `split-window` request that backs [`Pane::split`].
@@ -18,13 +20,38 @@ pub(super) async fn split_pane(
     target: &PaneRef,
     direction: SplitDirection,
 ) -> Result<PaneRef> {
+    split_pane_with_process(
+        client,
+        target,
+        direction,
+        ProcessSpec::default(),
+        None,
+        None,
+    )
+    .await
+}
+
+pub(super) async fn split_pane_with_process(
+    client: &TransportClient,
+    target: &PaneRef,
+    direction: SplitDirection,
+    process: ProcessSpec,
+    cwd: Option<PathBuf>,
+    keep_alive_on_exit: Option<bool>,
+) -> Result<PaneRef> {
+    let (command, process_command, environment) = process.into_proto_parts();
+    crate::capabilities::require_process_command_if_present(client, process_command.as_ref())
+        .await?;
     match client
         .request(Request::SplitWindowExt(SplitWindowExtRequest {
             target: SplitWindowTarget::Pane(target.into()),
             direction: direction.axis(),
             before: direction.before(),
-            environment: None,
-            command: None,
+            environment,
+            command,
+            process_command,
+            start_directory: cwd,
+            keep_alive_on_exit,
         }))
         .await?
     {

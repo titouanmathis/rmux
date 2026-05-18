@@ -1,10 +1,11 @@
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rmux_proto::{SdkWaitId, SdkWaitOwnerId};
+use tokio::sync::Mutex as AsyncMutex;
 
 use super::failure::TransportFailure;
 
@@ -14,6 +15,7 @@ static SDK_WAIT_OWNER_PROCESS_SEED: OnceLock<u64> = OnceLock::new();
 #[derive(Debug)]
 pub(super) struct TransportState {
     terminal_failure: Mutex<Option<TransportFailure>>,
+    capabilities: AsyncMutex<Option<Arc<[String]>>>,
     sdk_wait_owner_id: SdkWaitOwnerId,
     next_sdk_wait_id: AtomicU64,
 }
@@ -22,6 +24,7 @@ impl Default for TransportState {
     fn default() -> Self {
         Self {
             terminal_failure: Mutex::new(None),
+            capabilities: AsyncMutex::new(None),
             sdk_wait_owner_id: allocate_sdk_wait_owner_id(),
             next_sdk_wait_id: AtomicU64::new(1),
         }
@@ -38,6 +41,20 @@ impl TransportState {
         if terminal_failure.is_none() {
             *terminal_failure = Some(failure);
         }
+    }
+
+    pub(super) async fn cached_capabilities(&self) -> Option<Arc<[String]>> {
+        self.capabilities.lock().await.clone()
+    }
+
+    pub(super) async fn cache_capabilities(&self, capabilities: Vec<String>) -> Arc<[String]> {
+        let capabilities = Arc::<[String]>::from(capabilities);
+        let mut cached = self.capabilities.lock().await;
+        if let Some(existing) = cached.as_ref() {
+            return Arc::clone(existing);
+        }
+        *cached = Some(Arc::clone(&capabilities));
+        capabilities
     }
 
     pub(super) fn sdk_wait_owner_id(&self) -> SdkWaitOwnerId {

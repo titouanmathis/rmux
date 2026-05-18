@@ -214,6 +214,9 @@ pub(super) fn parse_split_window(
             before,
             environment: (!environment.is_empty()).then_some(environment),
             command,
+            process_command: None,
+            start_directory: None,
+            keep_alive_on_exit: None,
         }));
     }
 
@@ -488,5 +491,6 @@ pub(super) fn parse_respawn_pane(
         start_directory,
         environment: (!environment.is_empty()).then_some(environment),
         command,
+        process_command: None,
     }))
 }

@@ -45,6 +45,7 @@ pub(super) fn run_new_session(
             print_session_info: args.print_session_info,
             print_format: args.print_format,
             command: (!args.command.is_empty()).then_some(args.command),
+            process_command: None,
         })
         .map_err(ExitFailure::from_client)?;
     let output = response.command_output().cloned();

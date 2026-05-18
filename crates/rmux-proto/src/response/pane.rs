@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 use super::CommandOutput;
-use crate::{PaneId, PaneOutputSubscriptionId, PaneTarget, ResizePaneAdjustment, WindowTarget};
+use crate::{
+    PaneId, PaneOutputSubscriptionId, PaneTarget, PaneTargetRef, ResizePaneAdjustment, RmuxError,
+    WindowTarget,
+};
 
 /// Response payload for `split-window`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +114,39 @@ pub struct SelectPaneResponse {
 pub struct SendKeysResponse {
     /// The number of key tokens accepted by the server.
     pub key_count: usize,
+}
+
+/// Successful delivery for one target in a pane-input broadcast.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneBroadcastInputSuccess {
+    /// Zero-based target index from the request.
+    pub target_index: u32,
+    /// Resolved pane target that accepted the input.
+    pub target: PaneTarget,
+    /// Stable pane identity observed while resolving the target.
+    pub pane_id: Option<PaneId>,
+}
+
+/// Failed delivery for one target in a pane-input broadcast.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneBroadcastInputFailure {
+    /// Zero-based target index from the request.
+    pub target_index: u32,
+    /// Original target that failed to receive the input.
+    pub target: PaneTargetRef,
+    /// Per-pane protocol error.
+    pub error: RmuxError,
+}
+
+/// Response payload for a daemon-side pane-input broadcast.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneBroadcastInputResponse {
+    /// Number of key/text tokens accepted per successful target.
+    pub key_count: usize,
+    /// Targets that accepted the input, in request order.
+    pub successes: Vec<PaneBroadcastInputSuccess>,
+    /// Targets that rejected the input, in request order.
+    pub failures: Vec<PaneBroadcastInputFailure>,
 }
 
 /// Serializable pane-output cursor state returned by subscription endpoints.

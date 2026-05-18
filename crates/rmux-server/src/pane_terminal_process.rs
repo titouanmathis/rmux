@@ -6,7 +6,7 @@ use std::process::ExitStatus;
 use std::time::Duration;
 
 use rmux_core::PaneGeometry;
-use rmux_proto::RmuxError;
+use rmux_proto::{ProcessCommand, RmuxError};
 use rmux_pty::{PtyChild, PtyMaster, Signal, TerminalSize as PtyTerminalSize};
 
 use crate::terminal::{spawn_pane_process, TerminalProfile};
@@ -148,7 +148,7 @@ pub(crate) fn open_pane_terminal(
     geometry: PaneGeometry,
     profile: TerminalProfile,
     runtime_window_name: Option<String>,
-    command: Option<&[String]>,
+    command: Option<&ProcessCommand>,
 ) -> Result<PaneTerminal, RmuxError> {
     let (master, child) = spawn_pane_process(pty_size_from_geometry(geometry), &profile, command)?;
     Ok(PaneTerminal::new(

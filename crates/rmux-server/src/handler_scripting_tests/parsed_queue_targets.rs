@@ -158,6 +158,7 @@ async fn parsed_queue_uses_current_target_for_more_default_targeted_commands() {
                 kill: true,
                 environment: None,
                 command: Some(vec!["printf".to_owned(), "hello".to_owned()]),
+                process_command: None,
                 start_directory: None,
             }),
         ),

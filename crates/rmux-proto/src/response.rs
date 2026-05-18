@@ -7,8 +7,9 @@ use crate::{ControlModeResponse, HandshakeResponse, LayoutName, RmuxError, SdkWa
 #[path = "response/session.rs"]
 mod session;
 pub use session::{
-    HasSessionResponse, KillSessionResponse, ListSessionsResponse, NewSessionResponse,
-    RenameSessionResponse,
+    CreateSessionLeaseResponse, HasSessionResponse, KillSessionResponse, ListSessionsResponse,
+    NewSessionResponse, ReleaseSessionLeaseResponse, RenameSessionResponse,
+    RenewSessionLeaseResponse,
 };
 
 #[path = "response/server.rs"]
@@ -35,12 +36,12 @@ pub use window::{
 mod pane;
 pub use pane::{
     BreakPaneResponse, DisplayPanesResponse, JoinPaneResponse, KillPaneResponse, LastPaneResponse,
-    ListPanesResponse, MovePaneResponse, PaneOutputCursor, PaneOutputCursorResponse,
-    PaneOutputEvent, PaneOutputLagNotice, PaneOutputLagResponse, PaneRecentOutput,
-    PaneSnapshotCell, PaneSnapshotCursor, PaneSnapshotResponse, PipePaneResponse,
-    ResizePaneResponse, RespawnPaneResponse, SelectPaneResponse, SendKeysResponse,
-    SplitWindowResponse, SubscribePaneOutputResponse, SwapPaneResponse,
-    UnsubscribePaneOutputResponse,
+    ListPanesResponse, MovePaneResponse, PaneBroadcastInputFailure, PaneBroadcastInputResponse,
+    PaneBroadcastInputSuccess, PaneOutputCursor, PaneOutputCursorResponse, PaneOutputEvent,
+    PaneOutputLagNotice, PaneOutputLagResponse, PaneRecentOutput, PaneSnapshotCell,
+    PaneSnapshotCursor, PaneSnapshotResponse, PipePaneResponse, ResizePaneResponse,
+    RespawnPaneResponse, SelectPaneResponse, SendKeysResponse, SplitWindowResponse,
+    SubscribePaneOutputResponse, SwapPaneResponse, UnsubscribePaneOutputResponse,
 };
 
 #[path = "response/client.rs"]
@@ -241,6 +242,14 @@ pub enum Response {
     SdkWaitForOutput(SdkWaitForOutputResponse),
     /// Success payload for daemon-backed SDK wait cancellation.
     CancelSdkWait(CancelSdkWaitResponse),
+    /// Success payload for daemon-side SDK pane-input broadcast.
+    PaneBroadcastInput(PaneBroadcastInputResponse),
+    /// Success payload for creating an app-owned session lease.
+    CreateSessionLease(CreateSessionLeaseResponse),
+    /// Success payload for renewing an app-owned session lease.
+    RenewSessionLease(RenewSessionLeaseResponse),
+    /// Success payload for releasing an app-owned session lease.
+    ReleaseSessionLease(ReleaseSessionLeaseResponse),
 }
 
 impl Response {
@@ -333,6 +342,10 @@ impl Response {
             Self::PaneOutputLag(_) => "pane-output-lag",
             Self::SdkWaitForOutput(_) => "sdk-wait-output",
             Self::CancelSdkWait(_) => "cancel-sdk-wait",
+            Self::PaneBroadcastInput(_) => "send-keys",
+            Self::CreateSessionLease(_) => "create-session-lease",
+            Self::RenewSessionLease(_) => "renew-session-lease",
+            Self::ReleaseSessionLease(_) => "release-session-lease",
             Self::LinkWindow(_) => "link-window",
             Self::UnlinkWindow(_) => "unlink-window",
             Self::ResolveTarget(_) => "resolve-target",
@@ -379,7 +392,11 @@ impl Response {
             | Self::PaneOutputCursor(_)
             | Self::PaneOutputLag(_)
             | Self::SdkWaitForOutput(_)
-            | Self::CancelSdkWait(_) => None,
+            | Self::CancelSdkWait(_)
+            | Self::PaneBroadcastInput(_)
+            | Self::CreateSessionLease(_)
+            | Self::RenewSessionLease(_)
+            | Self::ReleaseSessionLease(_) => None,
             _ => None,
         }
     }

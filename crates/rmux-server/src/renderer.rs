@@ -2,7 +2,7 @@ use rmux_core::input::{
     Colour, GridAttr, COLOUR_DEFAULT, COLOUR_FLAG_256, COLOUR_FLAG_RGB, COLOUR_NONE,
     COLOUR_TERMINAL,
 };
-use rmux_core::style::{parse_colour, Style};
+use rmux_core::style::{parse_colour, Style, StyleCell};
 use rmux_core::GridRenderOptions;
 use rmux_core::{
     formats::FormatContext, text_width as tmux_text_width, OptionStore, Pane, PaneGeometry, Screen,
@@ -133,15 +133,7 @@ pub(crate) fn render_pane_screen(
         return Vec::new();
     }
 
-    let mut styled_screen = screen.clone();
-    if let Some(style) = options.resolve_for_pane(
-        session.name(),
-        session.active_window_index(),
-        pane.index(),
-        OptionName::CopyModeSelectionStyle,
-    ) {
-        styled_screen.overlay_style_on_selected(style);
-    }
+    let styled_screen = styled_pane_screen(session, options, pane, screen);
 
     let rendered = styled_screen.capture_transcript(
         ScreenCaptureRange::default(),
@@ -174,6 +166,53 @@ pub(crate) fn render_pane_screen(
     }
     frame.extend_from_slice(b"\x1b[0m\x1b[u");
     frame
+}
+
+fn styled_pane_screen(
+    session: &Session,
+    options: &OptionStore,
+    pane: &Pane,
+    screen: &Screen,
+) -> Screen {
+    let mut styled_screen = screen.clone();
+    if let Some(style) = pane_default_style(session, options, pane) {
+        styled_screen.overlay_default_style(&style);
+    }
+    if let Some(style) = options.resolve_for_pane(
+        session.name(),
+        session.active_window_index(),
+        pane.index(),
+        OptionName::CopyModeSelectionStyle,
+    ) {
+        styled_screen.overlay_style_on_selected(style);
+    }
+    styled_screen
+}
+
+fn pane_default_style(session: &Session, options: &OptionStore, pane: &Pane) -> Option<Style> {
+    let mut style = Style::default();
+    let base = StyleCell::default();
+    let mut applied = false;
+    for option in [OptionName::WindowStyle, OptionName::WindowActiveStyle] {
+        if option == OptionName::WindowActiveStyle && pane.index() != session.active_pane_index() {
+            continue;
+        }
+        let Some(value) = options.resolve_for_pane(
+            session.name(),
+            session.active_window_index(),
+            pane.index(),
+            option,
+        ) else {
+            continue;
+        };
+        if value.is_empty() || value == "default" {
+            continue;
+        }
+        if style.parse_in_place(&base, value).is_ok() {
+            applied = true;
+        }
+    }
+    applied.then_some(style)
 }
 
 fn truncate_rendered_pane_line(line: &[u8], width: usize, utf8: &Utf8Config) -> Vec<u8> {

@@ -115,6 +115,55 @@ async fn send_keys_to_missing_pane_returns_error() {
 }
 
 #[tokio::test]
+async fn pane_broadcast_input_reports_per_target_successes_and_failures() {
+    let handler = RequestHandler::new();
+    let alpha = session_name("alpha");
+
+    let created = handler
+        .handle(Request::NewSession(NewSessionRequest {
+            session_name: alpha.clone(),
+            detached: true,
+            size: None,
+            environment: None,
+        }))
+        .await;
+    assert!(matches!(created, Response::NewSession(_)));
+
+    let missing_target = PaneTargetRef::by_id(alpha.clone(), PaneId::new(999));
+    let response = handler
+        .handle(Request::PaneBroadcastInput(PaneBroadcastInputRequest {
+            targets: vec![
+                PaneTargetRef::slot(PaneTarget::new(alpha.clone(), 0)),
+                missing_target.clone(),
+            ],
+            keys: vec!["hello".to_owned()],
+            literal: true,
+        }))
+        .await;
+
+    let Response::PaneBroadcastInput(response) = response else {
+        panic!("expected pane broadcast response, got {response:?}");
+    };
+    assert_eq!(response.key_count, 1);
+    assert_eq!(response.successes.len(), 1);
+    assert_eq!(response.successes[0].target_index, 0);
+    assert_eq!(
+        response.successes[0].target,
+        PaneTarget::new(alpha.clone(), 0)
+    );
+    assert_eq!(response.failures.len(), 1);
+    assert_eq!(response.failures[0].target_index, 1);
+    assert_eq!(response.failures[0].target, missing_target);
+    assert!(matches!(
+        response.failures[0].error,
+        RmuxError::PaneNotFound {
+            ref session_name,
+            pane_id,
+        } if session_name == &alpha && pane_id == PaneId::new(999)
+    ));
+}
+
+#[tokio::test]
 async fn bind_key_and_list_keys_round_trip_through_the_handler() {
     let handler = RequestHandler::new();
 

@@ -8,12 +8,13 @@ use rmux_core::events::{
 use rmux_proto::{
     ErrorResponse, PaneOutputCursor, PaneOutputCursorRequest, PaneOutputCursorResponse,
     PaneOutputEvent, PaneOutputLagNotice, PaneOutputLagResponse, PaneOutputSubscriptionId,
-    PaneOutputSubscriptionStart, PaneRecentOutput, Response, RmuxError, SubscribePaneOutputRequest,
-    SubscribePaneOutputResponse, UnsubscribePaneOutputRequest, UnsubscribePaneOutputResponse,
-    DEFAULT_MAX_FRAME_LENGTH,
+    PaneOutputSubscriptionStart, PaneRecentOutput, PaneTarget, PaneTargetRef, Response, RmuxError,
+    SubscribePaneOutputRefRequest, SubscribePaneOutputRequest, SubscribePaneOutputResponse,
+    UnsubscribePaneOutputRequest, UnsubscribePaneOutputResponse, DEFAULT_MAX_FRAME_LENGTH,
 };
 
 use crate::pane_io::{PaneOutputReceiver, PaneOutputSender};
+use crate::pane_terminals::{session_not_found, HandlerState};
 
 use super::RequestHandler;
 
@@ -124,14 +125,39 @@ impl RequestHandler {
         connection_id: u64,
         request: SubscribePaneOutputRequest,
     ) -> Response {
+        self.subscribe_pane_output(
+            connection_id,
+            PaneTargetRef::slot(request.target),
+            request.start,
+        )
+        .await
+    }
+
+    pub(in crate::handler) async fn handle_subscribe_pane_output_ref(
+        &self,
+        connection_id: u64,
+        request: SubscribePaneOutputRefRequest,
+    ) -> Response {
+        self.subscribe_pane_output(connection_id, request.target, request.start)
+            .await
+    }
+
+    async fn subscribe_pane_output(
+        &self,
+        connection_id: u64,
+        target_ref: PaneTargetRef,
+        start: PaneOutputSubscriptionStart,
+    ) -> Response {
         let now = Instant::now();
-        let (subscription_id, pane_id, cursor) = {
-            let (pane_key, output) = match self.pane_output_subscription_source(&request, now).await
+        let (subscription_id, target, pane_id, cursor) = {
+            let (target, pane_key, output) = match self
+                .pane_output_subscription_source(&target_ref, start, now)
+                .await
             {
                 Ok(source) => source,
                 Err(error) => return Response::Error(ErrorResponse { error }),
             };
-            let receiver = match request.start {
+            let receiver = match start {
                 PaneOutputSubscriptionStart::Now => output.subscribe(),
                 PaneOutputSubscriptionStart::Oldest => output.subscribe_from_oldest(),
             };
@@ -156,12 +182,12 @@ impl RequestHandler {
             let cursor = cursor_dto(receiver.cursor());
             let subscription_id = record.id();
             subscriptions.receivers.insert(record.id(), receiver);
-            (subscription_id, pane_key.pane_id(), cursor)
+            (subscription_id, target, pane_key.pane_id(), cursor)
         };
 
         Response::SubscribePaneOutput(SubscribePaneOutputResponse {
             subscription_id,
-            target: request.target,
+            target,
             pane_id,
             cursor,
         })
@@ -169,29 +195,35 @@ impl RequestHandler {
 
     async fn pane_output_subscription_source(
         &self,
-        request: &SubscribePaneOutputRequest,
+        target_ref: &PaneTargetRef,
+        start: PaneOutputSubscriptionStart,
         now: Instant,
-    ) -> Result<(PaneOutputSubscriptionKey, PaneOutputSender), RmuxError> {
+    ) -> Result<(PaneTarget, PaneOutputSubscriptionKey, PaneOutputSender), RmuxError> {
         let live_result = {
             let state = self.state.lock().await;
-            let pane_key = state.pane_output_subscription_key_for_target(&request.target);
-            let output = state.pane_output_for_target(
-                request.target.session_name(),
-                request.target.window_index(),
-                request.target.pane_index(),
-            );
-            match (pane_key, output) {
-                (Ok(pane_key), Ok(output)) => Ok((pane_key, output)),
-                (Err(error), _) | (_, Err(error)) => Err(error),
+            match resolve_pane_target_ref(&state, target_ref) {
+                Ok(target) => {
+                    let pane_key = state.pane_output_subscription_key_for_target(&target);
+                    let output = state.pane_output_for_target(
+                        target.session_name(),
+                        target.window_index(),
+                        target.pane_index(),
+                    );
+                    match (pane_key, output) {
+                        (Ok(pane_key), Ok(output)) => Ok((target, pane_key, output)),
+                        (Err(error), _) | (_, Err(error)) => Err(error),
+                    }
+                }
+                Err(error) => Err(error),
             }
         };
 
         match live_result {
             Ok(source) => Ok(source),
             Err(live_error) => {
-                if request.start == PaneOutputSubscriptionStart::Oldest {
-                    if let Some(retained) = self.retained_exited_pane_output(&request.target, now) {
-                        return Ok((retained.pane().clone(), retained.output().clone()));
+                if start == PaneOutputSubscriptionStart::Oldest {
+                    if let Some((target, retained)) = retained_lookup(self, target_ref, now)? {
+                        return Ok((target, retained.pane().clone(), retained.output().clone()));
                     }
                 }
                 Err(live_error)
@@ -387,6 +419,67 @@ impl RequestHandler {
             .lock()
             .expect("subscription registry mutex must not be poisoned");
         subscriptions.pane_drain_idle_for(pane, Instant::now())
+    }
+}
+
+fn retained_lookup(
+    handler: &RequestHandler,
+    target: &PaneTargetRef,
+    now: Instant,
+) -> Result<
+    Option<(
+        PaneTarget,
+        super::exited_output_support::RetainedExitedPaneOutput,
+    )>,
+    RmuxError,
+> {
+    match target {
+        PaneTargetRef::Slot(target) => Ok(handler
+            .retained_exited_pane_output(target, now)
+            .map(|retained| (target.clone(), retained))),
+        PaneTargetRef::Id {
+            session_name,
+            pane_id,
+        } => {
+            let pane_key = PaneOutputSubscriptionKey::new(session_name.clone(), *pane_id);
+            Ok(handler.retained_exited_pane_output_by_pane(&pane_key, now))
+        }
+    }
+}
+
+fn resolve_pane_target_ref(
+    state: &HandlerState,
+    target: &PaneTargetRef,
+) -> Result<PaneTarget, RmuxError> {
+    match target {
+        PaneTargetRef::Slot(target) => Ok(target.clone()),
+        PaneTargetRef::Id {
+            session_name,
+            pane_id,
+        } => {
+            let session = state
+                .sessions
+                .session(session_name)
+                .ok_or_else(|| session_not_found(session_name))?;
+            let window_index = session
+                .window_index_for_pane_id(*pane_id)
+                .ok_or_else(|| RmuxError::pane_not_found(session_name.clone(), *pane_id))?;
+            let pane_index = session
+                .window_at(window_index)
+                .and_then(|window| {
+                    window
+                        .panes()
+                        .iter()
+                        .find(|pane| pane.id() == *pane_id)
+                        .map(|pane| pane.index())
+                })
+                .ok_or_else(|| RmuxError::pane_not_found(session_name.clone(), *pane_id))?;
+            Ok(PaneTarget::with_window(
+                session_name.clone(),
+                window_index,
+                pane_index,
+            ))
+        }
     }
 }
 

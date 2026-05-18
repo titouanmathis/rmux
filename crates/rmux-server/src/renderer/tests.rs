@@ -283,6 +283,74 @@ fn zoomed_sessions_render_only_the_active_pane_screen() {
 }
 
 #[test]
+fn pane_render_leaves_default_cells_at_terminal_default_without_user_style() {
+    let size = TerminalSize { cols: 6, rows: 2 };
+    let session = Session::new(session_name("alpha"), size);
+    let pane = session.window().pane(0).expect("pane 0 exists");
+    let screen = screen_with(b"\x1b[44mB\x1b[0mD", size);
+    let options = OptionStore::new();
+
+    let frame = String::from_utf8(super::render_pane_screen(&session, &options, pane, &screen))
+        .expect("pane frame is utf-8");
+
+    assert!(frame.contains("\u{1b}[44mB"), "{frame:?}");
+    assert!(frame.contains("\u{1b}[49mD"), "{frame:?}");
+    assert!(!frame.contains("\u{1b}[40mD"), "{frame:?}");
+}
+
+#[test]
+fn pane_render_applies_window_style_to_default_cells() {
+    let size = TerminalSize { cols: 6, rows: 2 };
+    let session = Session::new(session_name("alpha"), size);
+    let window = WindowTarget::with_window(session.name().clone(), 0);
+    let pane = session.window().pane(0).expect("pane 0 exists");
+    let screen = screen_with(b"\x1b[44mB\x1b[0mD", size);
+    let mut options = OptionStore::new();
+    options
+        .set(
+            ScopeSelector::Window(window),
+            OptionName::WindowStyle,
+            "bg=black".to_owned(),
+            SetOptionMode::Replace,
+        )
+        .expect("window style set succeeds");
+
+    let frame = String::from_utf8(super::render_pane_screen(&session, &options, pane, &screen))
+        .expect("pane frame is utf-8");
+
+    assert!(frame.contains("\u{1b}[44mB"), "{frame:?}");
+    assert!(frame.contains("\u{1b}[40mD"), "{frame:?}");
+}
+
+#[test]
+fn pane_render_active_style_overlays_window_style_for_default_cells() {
+    let size = TerminalSize { cols: 6, rows: 2 };
+    let session = Session::new(session_name("alpha"), size);
+    let window = WindowTarget::with_window(session.name().clone(), 0);
+    let pane = session.window().pane(0).expect("pane 0 exists");
+    let screen = screen_with(b"D", size);
+    let mut options = OptionStore::new();
+    for (option, value) in [
+        (OptionName::WindowStyle, "bg=black"),
+        (OptionName::WindowActiveStyle, "bg=red"),
+    ] {
+        options
+            .set(
+                ScopeSelector::Window(window.clone()),
+                option,
+                value.to_owned(),
+                SetOptionMode::Replace,
+            )
+            .expect("window style set succeeds");
+    }
+
+    let frame = String::from_utf8(super::render_pane_screen(&session, &options, pane, &screen))
+        .expect("pane frame is utf-8");
+
+    assert!(frame.contains("\u{1b}[41mD"), "{frame:?}");
+}
+
+#[test]
 fn two_pane_sessions_render_the_main_vertical_border_column_and_exact_frame_bytes() {
     let mut session = Session::new(session_name("alpha"), TerminalSize { cols: 4, rows: 2 });
     session.split_active_pane().expect("split succeeds");

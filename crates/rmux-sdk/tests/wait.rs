@@ -339,6 +339,192 @@ async fn wait_for_text_observes_rendered_daemon_output() -> TestResult {
     harness.finish().await
 }
 
+#[tokio::test]
+async fn expect_visible_text_to_contain_returns_matching_snapshot() -> TestResult {
+    let socket = TestSocket::new("visible-contain")?;
+    let listener = UnixListener::bind(socket.path())?;
+    let server = tokio::spawn(async move {
+        let mut peer = accept_peer(&listener).await?;
+        expect_list_panes(&mut peer).await?;
+        expect_snapshot(&mut peer, "visible ready marker", 1).await?;
+        assert_peer_closed_without_request(&mut peer).await?;
+        TestResult::Ok(())
+    });
+
+    let pane = pane_for(socket.path(), Duration::from_secs(1)).await?;
+    let snapshot = pane.expect_visible_text().to_contain("ready").await?;
+    assert!(snapshot.visible_text().contains("ready"));
+    drop(pane);
+    server.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn expect_visible_text_supports_any_and_all_matchers() -> TestResult {
+    let socket = TestSocket::new("visible-any-all")?;
+    let listener = UnixListener::bind(socket.path())?;
+    let server = tokio::spawn(async move {
+        let mut peer = accept_peer(&listener).await?;
+        expect_list_panes(&mut peer).await?;
+        expect_snapshot(&mut peer, "alpha beta gamma", 1).await?;
+        expect_list_panes(&mut peer).await?;
+        expect_snapshot(&mut peer, "delta epsilon zeta", 2).await?;
+        assert_peer_closed_without_request(&mut peer).await?;
+        TestResult::Ok(())
+    });
+
+    let pane = pane_for(socket.path(), Duration::from_secs(1)).await?;
+    let any = pane
+        .expect_visible_text()
+        .to_match_any(["missing", "beta"])
+        .await?;
+    assert!(any.visible_text().contains("beta"));
+    let all = pane
+        .expect_visible_text()
+        .to_match_all(["delta", "zeta"])
+        .await?;
+    assert!(all.visible_text().contains("delta"));
+    assert!(all.visible_text().contains("zeta"));
+    drop(pane);
+    server.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn expect_visible_text_not_to_contain_waits_until_text_disappears() -> TestResult {
+    let socket = TestSocket::new("visible-not-contain")?;
+    let listener = UnixListener::bind(socket.path())?;
+    let server = tokio::spawn(async move {
+        let mut peer = accept_peer(&listener).await?;
+        expect_list_panes(&mut peer).await?;
+        expect_snapshot(&mut peer, "loading marker", 1).await?;
+        expect_list_panes(&mut peer).await?;
+        expect_snapshot(&mut peer, "ready", 2).await?;
+        assert_peer_closed_without_request(&mut peer).await?;
+        TestResult::Ok(())
+    });
+
+    let pane = pane_for(socket.path(), Duration::from_secs(1)).await?;
+    let snapshot = pane
+        .expect_visible_text()
+        .not_to_contain("loading")
+        .poll_interval(Duration::from_millis(10))
+        .await?;
+    assert_eq!(snapshot.visible_text(), "ready");
+    drop(pane);
+    server.await??;
+    Ok(())
+}
+
+#[cfg(feature = "regex")]
+#[tokio::test]
+async fn expect_visible_text_supports_regex_matchers() -> TestResult {
+    let socket = TestSocket::new("visible-regex")?;
+    let listener = UnixListener::bind(socket.path())?;
+    let server = tokio::spawn(async move {
+        let mut peer = accept_peer(&listener).await?;
+        expect_list_panes(&mut peer).await?;
+        expect_snapshot(&mut peer, "worker 42 ready", 1).await?;
+        expect_list_panes(&mut peer).await?;
+        expect_snapshot(&mut peer, "error E17", 2).await?;
+        expect_list_panes(&mut peer).await?;
+        expect_snapshot(&mut peer, "done", 3).await?;
+        assert_peer_closed_without_request(&mut peer).await?;
+        TestResult::Ok(())
+    });
+
+    let pane = pane_for(socket.path(), Duration::from_secs(1)).await?;
+    let matched = pane.expect_visible_text().to_match(r"worker \d+").await?;
+    assert!(matched.visible_text().contains("worker 42"));
+
+    let any = pane
+        .expect_visible_text()
+        .to_match_any_regex([r"missing \d+", r"E\d+"])
+        .await?;
+    assert!(any.visible_text().contains("E17"));
+
+    let not_matched = pane
+        .expect_visible_text()
+        .not_to_match_regex(r"E\d+")
+        .poll_interval(Duration::from_millis(10))
+        .await?;
+    assert_eq!(not_matched.visible_text(), "done");
+    drop(pane);
+    server.await??;
+    Ok(())
+}
+
+#[cfg(feature = "regex")]
+#[tokio::test]
+async fn expect_visible_text_rejects_invalid_regex_before_polling() -> TestResult {
+    let socket = TestSocket::new("visible-invalid-regex")?;
+    let listener = UnixListener::bind(socket.path())?;
+    let server = tokio::spawn(async move {
+        let mut peer = accept_peer(&listener).await?;
+        assert_peer_closed_without_request(&mut peer).await?;
+        TestResult::Ok(())
+    });
+
+    let pane = pane_for(socket.path(), Duration::from_secs(1)).await?;
+    let error = pane
+        .expect_visible_text()
+        .to_match_regex("[")
+        .await
+        .expect_err("invalid regex must be rejected before snapshot polling");
+    match error {
+        RmuxError::InvalidRegex { pattern, .. } => assert_eq!(pattern, "["),
+        other => panic!("expected typed invalid regex error, got {other:?}"),
+    }
+    drop(pane);
+    server.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn expect_visible_text_timeout_includes_last_snapshot() -> TestResult {
+    let socket = TestSocket::new("visible-timeout")?;
+    let listener = UnixListener::bind(socket.path())?;
+    let server = tokio::spawn(async move {
+        let mut peer = accept_peer(&listener).await?;
+        while let Some(request) = peer.read_request().await? {
+            match request {
+                Request::ListPanes(_) => {
+                    peer.write_response(Response::ListPanes(ListPanesResponse {
+                        output: CommandOutput::from_stdout(b"0:0:%1\n".to_vec()),
+                    }))
+                    .await?;
+                }
+                Request::PaneSnapshot(_) => {
+                    peer.write_response(Response::PaneSnapshot(snapshot_response(
+                        "last visible screen",
+                        7,
+                    )))
+                    .await?;
+                }
+                other => panic!("visible wait should only poll snapshots, got {other:?}"),
+            }
+        }
+        TestResult::Ok(())
+    });
+
+    let pane = pane_for(socket.path(), Duration::from_secs(1)).await?;
+    let error = pane
+        .expect_visible_text()
+        .to_contain("never")
+        .timeout(Duration::from_millis(35))
+        .poll_interval(Duration::from_millis(10))
+        .await
+        .expect_err("missing visible text must time out");
+    let RmuxError::WaitTimeout { source, .. } = error else {
+        return Err(format!("expected visible wait timeout, got {error:?}").into());
+    };
+    assert_eq!(source.matcher(), "contain `never`");
+    assert!(source.last_visible_text().contains("last visible screen"));
+    drop(pane);
+    server.await??;
+    Ok(())
+}
+
 async fn pane_for(socket_path: &Path, timeout: Duration) -> TestResult<Pane> {
     let rmux = RmuxBuilder::new()
         .unix_socket(socket_path)

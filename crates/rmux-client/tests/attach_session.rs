@@ -229,6 +229,7 @@ fn attach_with_terminal_restores_termios_after_repeated_detach() -> Result<(), B
                 ATTACH_READY_MARKER
             ),
         ]),
+        process_command: None,
     }))?;
     assert!(matches!(created, Response::NewSession(_)));
 

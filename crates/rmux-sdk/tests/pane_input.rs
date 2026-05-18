@@ -12,8 +12,8 @@ use rmux_proto::{
     HasSessionRequest, KillPaneRequest, NewWindowRequest, PaneTarget, Request, Response,
 };
 use rmux_sdk::{
-    EnsureSession, PaneRef, PaneSnapshot, RmuxBuilder, SessionName, SplitDirection,
-    TerminalSizeSpec,
+    EnsureSession, Input, PaneId, PaneRef, PaneSnapshot, RmuxBuilder, RmuxError, SessionName,
+    SplitDirection, TerminalSizeSpec,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -204,6 +204,179 @@ async fn input_and_resize_return_daemon_errors_for_stale_or_missing_panes() -> T
     harness.finish().await
 }
 
+#[tokio::test]
+async fn pane_by_id_survives_index_recompression_for_critical_input_and_snapshot() -> TestResult {
+    let _lock = LIVE_DAEMON_LOCK.lock().await;
+    let harness = Harness::start("pane-input-by-id").await?;
+    let rmux = harness.rmux();
+    let alpha = session_name("sdkpaneinputid");
+    let session = EnsureSession::named(alpha.clone())
+        .create_only()
+        .ensure(&rmux)
+        .await?;
+
+    session.pane(0, 0).split(SplitDirection::Right).await?;
+    session.pane(0, 1).split(SplitDirection::Right).await?;
+
+    let original_left = session.pane(0, 0).id().await?.expect("left pane has an id");
+    let middle_id = session
+        .pane(0, 1)
+        .id()
+        .await?
+        .expect("middle pane has an id");
+    let right_id = session
+        .pane(0, 2)
+        .id()
+        .await?
+        .expect("right pane has an id");
+    let middle = session.pane_by_id(middle_id).await?;
+
+    raw_kill_pane(
+        harness.socket_path(),
+        PaneTarget::with_window(alpha.clone(), 0, 0),
+    )
+    .await?;
+    wait_for_slot_id(&session, 0, 0, Some(middle_id)).await?;
+    wait_for_slot_id(&session, 0, 1, Some(right_id)).await?;
+    assert_eq!(
+        middle.id().await?,
+        Some(middle_id),
+        "stable pane handle must keep addressing the original pane id"
+    );
+    assert_eq!(
+        session.pane(0, 0).id().await?,
+        Some(middle_id),
+        "middle pane should have recompressed into slot 0"
+    );
+    assert_ne!(
+        session.pane(0, 0).id().await?,
+        Some(original_left),
+        "closed pane id must not be reused during the live session"
+    );
+
+    let marker = "sdk_by_id_recompressed_marker";
+    middle.send_text(format!("printf '{marker}\\n'\n")).await?;
+    wait_for_revision_and_text(&middle, 0, marker).await?;
+
+    let raw_marker = "sdk_by_id_raw_wait_marker";
+    let raw_wait = middle.wait_for_text_next(raw_marker).await?;
+    let mut render_stream = middle.render_stream().await?;
+    middle
+        .send_text(format!("printf '{raw_marker}\\n'\n"))
+        .await?;
+    raw_wait.await?;
+    let update = wait_for_render_text(&mut render_stream, raw_marker).await?;
+    assert!(
+        update.snapshot().visible_text().contains(raw_marker),
+        "render_stream on a by-id handle must follow the recompressed pane"
+    );
+    drop(render_stream);
+
+    let right_snapshot = session.pane(0, 1).snapshot().await?;
+    assert!(
+        !right_snapshot.visible_text().contains(marker),
+        "slot-based stale targeting would have written into the right neighbor"
+    );
+    assert!(
+        !right_snapshot.visible_text().contains(raw_marker),
+        "slot-based stale stream/wait targeting would have followed the right neighbor"
+    );
+
+    harness.finish().await
+}
+
+#[tokio::test]
+async fn broadcast_sends_text_and_keys_to_multiple_panes() -> TestResult {
+    let _lock = LIVE_DAEMON_LOCK.lock().await;
+    let harness = Harness::start("pane-input-broadcast").await?;
+    let rmux = harness.rmux();
+    let alpha = session_name("sdkpaneinputbr");
+    let session = EnsureSession::named(alpha)
+        .create_only()
+        .ensure(&rmux)
+        .await?;
+    let right = session.pane(0, 0).split(SplitDirection::Right).await?;
+    let panes = vec![session.pane(0, 0), right];
+
+    let command = "printf 'sdk_broadcast_%s\\n' $((40+2))";
+    let text = rmux.broadcast(&panes, Input::Text(command)).await?;
+    assert_eq!(text.len(), panes.len());
+    let enter = rmux.broadcast(&panes, Input::Key("Enter")).await?;
+    assert_eq!(enter.len(), panes.len());
+
+    for pane in &panes {
+        wait_for_revision_and_text(pane, 0, "sdk_broadcast_42").await?;
+    }
+
+    harness.finish().await
+}
+
+#[tokio::test]
+async fn broadcast_reports_partial_failures_by_pane() -> TestResult {
+    let _lock = LIVE_DAEMON_LOCK.lock().await;
+    let harness = Harness::start("pane-input-broadcast-partial").await?;
+    let rmux = harness.rmux();
+    let alpha = session_name("sdkpaneinputbp");
+    let session = EnsureSession::named(alpha.clone())
+        .create_only()
+        .ensure(&rmux)
+        .await?;
+    session.pane(0, 0).split(SplitDirection::Right).await?;
+    let stale_id = session.pane(0, 0).id().await?.expect("left pane has an id");
+    let live_id = session
+        .pane(0, 1)
+        .id()
+        .await?
+        .expect("right pane has an id");
+    let stale = session.pane_by_id(stale_id).await?;
+    let live = session.pane_by_id(live_id).await?;
+    raw_kill_pane(
+        harness.socket_path(),
+        PaneTarget::with_window(alpha.clone(), 0, 0),
+    )
+    .await?;
+    wait_for_pane_unlisted(&stale).await?;
+
+    let panes = vec![stale, live];
+    let error = rmux
+        .broadcast(&panes, Input::Key("Enter"))
+        .await
+        .expect_err("stale pane must produce a partial broadcast failure");
+    let RmuxError::PartialBroadcast { source, .. } = error else {
+        return Err(format!("expected partial broadcast failure, got {error:?}").into());
+    };
+    assert_eq!(source.successes().len(), 1);
+    assert_eq!(source.failures().len(), 1);
+    assert!(matches!(
+        source.failures()[0].error(),
+        RmuxError::PaneNotFound { .. }
+    ));
+
+    harness.finish().await
+}
+
+#[tokio::test]
+async fn render_stream_emits_snapshot_after_output() -> TestResult {
+    let _lock = LIVE_DAEMON_LOCK.lock().await;
+    let harness = Harness::start("pane-input-render-stream").await?;
+    let rmux = harness.rmux();
+    let session = EnsureSession::named(session_name("sdkpaneinputrs"))
+        .create_only()
+        .ensure(&rmux)
+        .await?;
+    let pane = session.pane(0, 0);
+    let mut stream = pane.render_stream().await?;
+
+    pane.send_text("printf 'sdk_render_%s\\n' $((40+2))")
+        .await?;
+    pane.send_key("Enter").await?;
+    let update = wait_for_render_text(&mut stream, "sdk_render_42").await?;
+    assert!(update.snapshot().visible_text().contains("sdk_render_42"));
+    drop(stream);
+
+    harness.finish().await
+}
+
 async fn wait_for_revision_and_text(
     pane: &rmux_sdk::Pane,
     previous_revision: u64,
@@ -267,6 +440,28 @@ async fn wait_for_pane_columns(
     }
 }
 
+async fn wait_for_render_text(
+    stream: &mut rmux_sdk::PaneRenderStream,
+    marker: &str,
+) -> TestResult<rmux_sdk::RenderUpdate> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match tokio::time::timeout(Duration::from_millis(250), stream.next()).await {
+            Ok(Ok(Some(update))) => {
+                if update.snapshot().visible_text().contains(marker) {
+                    return Ok(update);
+                }
+            }
+            Ok(Ok(None)) => return Err("render stream closed before marker".into()),
+            Ok(Err(error)) => return Err(error.into()),
+            Err(_) => {}
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("render stream did not emit {marker:?} within deadline").into());
+        }
+    }
+}
+
 async fn wait_for_pane_unlisted(pane: &rmux_sdk::Pane) -> TestResult {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -275,6 +470,28 @@ async fn wait_for_pane_unlisted(pane: &rmux_sdk::Pane) -> TestResult {
         }
         if Instant::now() >= deadline {
             return Err("pane remained listed after kill".into());
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+async fn wait_for_slot_id(
+    session: &rmux_sdk::Session,
+    window_index: u32,
+    pane_index: u32,
+    expected: Option<PaneId>,
+) -> TestResult {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let observed = session.pane(window_index, pane_index).id().await?;
+        if observed == expected {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "pane slot {window_index}.{pane_index} did not reach id {expected:?}; got {observed:?}"
+            )
+            .into());
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }

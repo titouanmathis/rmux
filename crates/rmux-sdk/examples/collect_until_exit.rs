@@ -13,30 +13,26 @@
 
 use std::time::Duration;
 
-use rmux_sdk::{EnsureSession, PaneProcessState, ProcessSpec, Result, Rmux, TerminalSizeSpec};
+use rmux_sdk::{EnsureSession, PaneOutputStart, PaneProcessState, Result, Rmux, TerminalSizeSpec};
 
 const TRANSCRIPT_BUDGET_BYTES: usize = 64 * 1024;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let rmux = Rmux::builder()
-        .default_endpoint()
         .default_timeout(Duration::from_secs(30))
-        .build();
+        .connect_or_start()
+        .await?;
 
     let session = rmux
         .ensure_session(
-            EnsureSession::try_named("rmux-sdk-collect-until-exit")?
-                .create_or_reuse()
-                .size(TerminalSizeSpec::new(80, 24))
-                .process(ProcessSpec {
-                    command: Some(vec![
-                        "sh".to_owned(),
-                        "-c".to_owned(),
-                        "printf 'hello\\nworld\\n'; exit 0".to_owned(),
-                    ]),
-                    environment: None,
-                }),
+            EnsureSession::try_named(format!(
+                "rmux-sdk-collect-until-exit-{}",
+                std::process::id()
+            ))?
+            .create_only()
+            .size(TerminalSizeSpec::new(80, 24))
+            .argv(collect_command()),
         )
         .await?;
 
@@ -47,7 +43,7 @@ async fn main() -> Result<()> {
     // returned `exit_state` matches the daemon's view of the child's exit
     // and `truncated` flips on if the budget was reached.
     let collected = pane
-        .collect_output_until_exit(TRANSCRIPT_BUDGET_BYTES)
+        .collect_output_until_exit_starting_at(PaneOutputStart::Oldest, TRANSCRIPT_BUDGET_BYTES)
         .await?;
 
     println!(
@@ -76,4 +72,23 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(unix)]
+fn collect_command() -> Vec<String> {
+    vec![
+        "sh".to_owned(),
+        "-c".to_owned(),
+        "printf 'hello\\nworld\\n'; exit 0".to_owned(),
+    ]
+}
+
+#[cfg(windows)]
+fn collect_command() -> Vec<String> {
+    vec![
+        "cmd.exe".to_owned(),
+        "/D".to_owned(),
+        "/C".to_owned(),
+        "echo hello&&echo world".to_owned(),
+    ]
 }

@@ -1,12 +1,9 @@
 //! Daemon-backed pane handle.
 //!
-//! The handle never caches a `PaneId`. Every operation re-reads the
-//! daemon's current view of the addressed `(session, window, pane)` slot,
-//! which is what keeps linked windows and grouped sessions returning the
-//! same stable `%N` identity through every sibling view, and what makes
-//! stale handles behave the same way as stale [`Window`](super::Window)
-//! handles: the typed empty/`None` results carry the original target
-//! verbatim instead of erroring out.
+//! A pane handle can address either an index slot or a stable [`PaneId`].
+//! Slot handles preserve existing tmux-like `(session, window, pane)` behavior;
+//! stable handles use by-id daemon routes where available and otherwise resolve
+//! the id against the daemon's current view before issuing the request.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -16,8 +13,9 @@ use crate::events::streams::{PaneLineStream, PaneOutputStart, PaneOutputStream};
 use crate::handles::split::SplitDirection;
 use crate::transport::TransportClient;
 use crate::{
-    ArmedWait, CollectedPaneOutput, InfoSnapshot, PaneExitState, PaneId, PaneRef, PaneSnapshot,
-    PaneTextMatch, ProcessSpec, Result, RmuxEndpoint, TerminalSizeSpec,
+    ArmedWait, CollectedPaneOutput, InfoSnapshot, PaneExitState, PaneId, PaneRef, PaneRenderStream,
+    PaneSnapshot, PaneTextMatch, ProcessSpec, Result, RmuxEndpoint, RmuxError, TerminalSizeSpec,
+    VisibleTextExpectation,
 };
 
 #[path = "pane/info.rs"]
@@ -28,17 +26,34 @@ mod input;
 mod lifecycle;
 #[path = "pane/snapshot.rs"]
 mod snapshot;
+#[path = "pane/spawn.rs"]
+mod spawn;
 #[path = "pane/split.rs"]
 mod split;
+#[path = "pane/split_builder.rs"]
+mod split_builder;
 #[path = "pane/target.rs"]
 mod target;
+#[path = "pane/title.rs"]
+mod title;
 
-use info::{current_pane_entry, pane_info_snapshot};
+use info::{current_pane_entry, current_pane_ref_for_id, pane_info_snapshot};
 use input::{resize_to_size, send_key, send_text};
 use lifecycle::{close_pane, respawn_pane};
 use snapshot::pane_snapshot;
+pub use spawn::PaneSpawnBuilder;
 use split::split_pane;
+pub use split_builder::PaneSplitBuilder;
 pub(crate) use target::is_already_closed_pane_error;
+use title::{get_title, set_title};
+
+pub(crate) async fn resolve_pane_ref_for_id(
+    transport: &TransportClient,
+    session_name: &rmux_proto::SessionName,
+    pane_id: PaneId,
+) -> Result<Option<PaneRef>> {
+    current_pane_ref_for_id(transport, session_name, pane_id).await
+}
 
 /// Result of consuming a [`Pane`] handle with [`Pane::close`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -67,6 +82,8 @@ pub struct PaneRespawnOptions {
     pub start_directory: Option<PathBuf>,
     /// Process argv and per-spawn environment overrides.
     pub process: ProcessSpec,
+    /// Optional keep-dead-pane policy applied before respawn.
+    pub keep_alive_on_exit: Option<bool>,
 }
 
 /// Opaque handle for one daemon pane slot.
@@ -89,6 +106,7 @@ pub struct PaneRespawnOptions {
 #[derive(Clone)]
 pub struct Pane {
     target: PaneRef,
+    stable_id: Option<PaneId>,
     endpoint: RmuxEndpoint,
     default_timeout: Option<Duration>,
     transport: TransportClient,
@@ -103,6 +121,23 @@ impl Pane {
     ) -> Self {
         Self {
             target,
+            stable_id: None,
+            endpoint,
+            default_timeout,
+            transport,
+        }
+    }
+
+    pub(crate) fn new_by_id(
+        target: PaneRef,
+        pane_id: PaneId,
+        endpoint: RmuxEndpoint,
+        default_timeout: Option<Duration>,
+        transport: TransportClient,
+    ) -> Self {
+        Self {
+            target,
+            stable_id: Some(pane_id),
             endpoint,
             default_timeout,
             transport,
@@ -130,6 +165,19 @@ impl Pane {
 
     pub(crate) const fn transport(&self) -> &TransportClient {
         &self.transport
+    }
+
+    pub(crate) fn proto_target_ref(&self) -> rmux_proto::PaneTargetRef {
+        match self.stable_id {
+            Some(pane_id) => {
+                rmux_proto::PaneTargetRef::by_id(self.target.session_name.clone(), pane_id)
+            }
+            None => rmux_proto::PaneTargetRef::slot(self.target.to_proto()),
+        }
+    }
+
+    pub(crate) const fn is_stable_id(&self) -> bool {
+        self.stable_id.is_some()
     }
 
     /// Waits until the pane emits the requested raw byte sequence.
@@ -170,6 +218,15 @@ impl Pane {
     /// history.
     pub async fn wait_for_text_next(&self, text: impl AsRef<str>) -> Result<ArmedWait> {
         crate::wait::wait_for_text_next(self, text.as_ref().to_owned()).await
+    }
+
+    /// Starts a visible-screen text expectation builder.
+    ///
+    /// Unlike raw output waits, visible waits poll rendered
+    /// [`PaneSnapshot`] text. They observe the current screen after terminal
+    /// control sequences, clears, wrapping, and redraws have been applied.
+    pub fn expect_visible_text(&self) -> VisibleTextExpectation<'_> {
+        VisibleTextExpectation::new(self)
     }
 
     /// Waits until the pane process exits or the pane slot becomes stale.
@@ -214,7 +271,7 @@ impl Pane {
         &self,
         start: PaneOutputStart,
     ) -> Result<PaneOutputStream> {
-        PaneOutputStream::open(self.transport.clone(), self.target.to_proto(), start).await
+        PaneOutputStream::open(self.transport.clone(), self.proto_target_ref(), start).await
     }
 
     /// Collects bounded raw pane output bytes until the pane process exits.
@@ -264,12 +321,27 @@ impl Pane {
         Ok(PaneLineStream::wrap(inner))
     }
 
+    /// Opens a minimal render stream that emits snapshots after output.
+    ///
+    /// The v0.1.3 implementation is output-driven with debounce and revision
+    /// filtering. It avoids fixed-rate blind refresh loops but is not a
+    /// daemon-native snapshot-diff stream.
+    pub async fn render_stream(&self) -> Result<PaneRenderStream> {
+        PaneRenderStream::open(self.clone()).await
+    }
+
     /// Returns the live daemon pane identity for this slot, when it is
     /// currently listed.
     ///
     /// Returns `Ok(None)` (rather than an error) for a stale slot, mirroring
     /// the [`Window`](super::Window)-handle stale-slot semantics.
     pub async fn id(&self) -> Result<Option<PaneId>> {
+        if let Some(pane_id) = self.stable_id {
+            let current =
+                current_pane_ref_for_id(&self.transport, &self.target.session_name, pane_id)
+                    .await?;
+            return Ok(current.map(|_| pane_id));
+        }
         Ok(current_pane_entry(&self.transport, &self.target)
             .await?
             .map(|entry| entry.pane_id))
@@ -292,7 +364,18 @@ impl Pane {
     /// snapshot when the window or pane is gone, or an empty snapshot
     /// when the session itself is gone.
     pub async fn info(&self) -> Result<InfoSnapshot> {
-        pane_info_snapshot(&self.transport, &self.target).await
+        match self.stable_id {
+            Some(pane_id) => {
+                let Some(target) =
+                    current_pane_ref_for_id(&self.transport, &self.target.session_name, pane_id)
+                        .await?
+                else {
+                    return Ok(InfoSnapshot::default());
+                };
+                pane_info_snapshot(&self.transport, &target).await
+            }
+            None => pane_info_snapshot(&self.transport, &self.target).await,
+        }
     }
 
     /// Captures the live pane grid as a [`PaneSnapshot`].
@@ -311,7 +394,7 @@ impl Pane {
     /// snapshot whose revision is `0`, distinct from any prior live
     /// revision.
     pub async fn snapshot(&self) -> Result<PaneSnapshot> {
-        pane_snapshot(&self.transport, &self.target).await
+        pane_snapshot(self).await
     }
 
     /// Captures a fresh snapshot and searches its rendered visible text for
@@ -339,7 +422,7 @@ impl Pane {
     /// [`send_key`](Self::send_key) when a tmux key token such as `Enter`
     /// should be interpreted as a key press.
     pub async fn send_text(&self, text: impl AsRef<str>) -> Result<()> {
-        send_text(&self.transport, &self.target, text.as_ref()).await
+        send_text(self, text.as_ref()).await
     }
 
     /// Sends one tmux-compatible key token to this pane through the daemon.
@@ -348,7 +431,7 @@ impl Pane {
     /// names such as `Enter` are encoded as keys, while ordinary text tokens
     /// are forwarded as their bytes by the server.
     pub async fn send_key(&self, key: impl Into<String>) -> Result<()> {
-        send_key(&self.transport, &self.target, key.into()).await
+        send_key(self, key.into()).await
     }
 
     /// Requests an absolute pane size through the daemon.
@@ -358,7 +441,21 @@ impl Pane {
     /// linked panes, borders, and neighboring panes can constrain the final
     /// geometry. No pane identity is cached by this handle.
     pub async fn resize(&self, size: TerminalSizeSpec) -> Result<()> {
-        resize_to_size(&self.transport, &self.target, size).await
+        resize_to_size(self, size).await
+    }
+
+    /// Sets this pane's UX title label.
+    ///
+    /// Titles are labels for humans and UI surfaces. They are not technical
+    /// identity; use [`Self::id`] and [`Session::pane_by_id`](super::Session::pane_by_id)
+    /// for stable addressing.
+    pub async fn set_title(&self, title: impl Into<String>) -> Result<()> {
+        set_title(self, title.into()).await
+    }
+
+    /// Returns this pane's current UX title label when the pane still exists.
+    pub async fn title(&self) -> Result<Option<String>> {
+        get_title(self).await
     }
 
     /// Consumes this handle and kills the addressed pane through the daemon.
@@ -368,7 +465,7 @@ impl Pane {
     /// inert; this consuming method is the SDK operation that explicitly
     /// closes the pane slot and its process.
     pub async fn close(self) -> Result<PaneCloseOutcome> {
-        close_pane(&self.transport, self.target).await
+        close_pane(self).await
     }
 
     /// Consumes this handle without sending any daemon request.
@@ -386,14 +483,34 @@ impl Pane {
     /// `Up`/`Down` create a stacked arrangement (horizontal divider).
     /// `Left` and `Up` map to tmux's `-b` flag — the new pane is inserted
     /// *before* this one on the chosen axis.
+    ///
+    /// For handles created by [`Session::pane_by_id`](crate::Session::pane_by_id),
+    /// the SDK resolves the stable pane id to the daemon's current slot before
+    /// issuing the split request. Unlike input, snapshot, waits, and streams,
+    /// split is therefore not yet an atomic daemon-side by-id operation.
     pub async fn split(&self, direction: SplitDirection) -> Result<Self> {
-        let new_target = split_pane(&self.transport, &self.target, direction).await?;
+        let target = self.current_target().await?;
+        let new_target = split_pane(&self.transport, &target, direction).await?;
         Ok(Self::new(
             new_target,
             self.endpoint.clone(),
             self.default_timeout,
             self.transport.clone(),
         ))
+    }
+
+    /// Starts building an atomic split that may choose the new pane process.
+    ///
+    /// Unlike `self.split(direction).await?.spawn(command).await?`, this
+    /// builder sends the process specification with the split request, so the
+    /// daemon never creates the new pane with an intermediate default shell
+    /// that is immediately replaced.
+    ///
+    /// On a stable-id pane handle, this builder has the same targeting
+    /// limitation as [`Self::split`]: the id is resolved to the current slot
+    /// before the split request is sent.
+    pub fn split_with(&self, direction: SplitDirection) -> PaneSplitBuilder<'_> {
+        PaneSplitBuilder::new(self, direction)
     }
 
     /// Respawns the process in this pane slot through the daemon.
@@ -405,7 +522,39 @@ impl Pane {
     /// scrollback, and retained output before exposing output from the fresh
     /// lifecycle generation.
     pub async fn respawn(&self, options: PaneRespawnOptions) -> Result<PaneRef> {
-        respawn_pane(&self.transport, &self.target, options).await
+        respawn_pane(self, options).await
+    }
+
+    /// Starts a structured respawn builder for this pane.
+    ///
+    /// `spawn(argv)` is an argv-oriented wrapper around [`Self::respawn`]:
+    /// it does not send text to an interactive shell and it does not append a
+    /// newline. A running process is rejected by default; call
+    /// [`PaneSpawnBuilder::kill_existing`] when replacement is intentional.
+    pub fn spawn<I, S>(&self, command: I) -> PaneSpawnBuilder<'_>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        PaneSpawnBuilder::argv(self, command.into_iter().map(Into::into).collect())
+    }
+
+    /// Starts an explicit shell-command respawn builder for this pane.
+    ///
+    /// This is the intentional `$SHELL -c` path. Use [`Self::spawn`] when the
+    /// process should be represented as structured argv without shell
+    /// interpretation.
+    pub fn shell(&self, command: impl Into<String>) -> PaneSpawnBuilder<'_> {
+        PaneSpawnBuilder::shell(self, command.into())
+    }
+
+    pub(crate) async fn current_target(&self) -> Result<PaneRef> {
+        let Some(pane_id) = self.stable_id else {
+            return Ok(self.target.clone());
+        };
+        current_pane_ref_for_id(&self.transport, &self.target.session_name, pane_id)
+            .await?
+            .ok_or_else(|| RmuxError::pane_not_found(self.target.session_name.clone(), pane_id))
     }
 }
 

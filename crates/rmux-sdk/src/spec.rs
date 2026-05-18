@@ -12,19 +12,93 @@ use serde::{Deserialize, Serialize};
 use crate::types::{PaneRef, TerminalSizeSpec};
 use crate::SessionName;
 
+/// Explicit process command mode used by SDK builders and specs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ProcessCommandSpec {
+    /// Execute a program directly with structured argv.
+    Argv(Vec<String>),
+    /// Execute command text through the configured shell.
+    Shell(String),
+}
+
+impl From<ProcessCommandSpec> for rmux_proto::ProcessCommand {
+    fn from(value: ProcessCommandSpec) -> Self {
+        match value {
+            ProcessCommandSpec::Argv(argv) => Self::Argv(argv),
+            ProcessCommandSpec::Shell(command) => Self::Shell(command),
+        }
+    }
+}
+
+impl ProcessCommandSpec {
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Self::Argv(argv) => argv.is_empty() || argv.first().is_some_and(String::is_empty),
+            Self::Shell(command) => command.is_empty(),
+        }
+    }
+}
+
 /// Process-spawn fields shared by SDK command specs.
 ///
-/// The SDK stores argv and environment overrides as supplied. It does not
-/// split shell text, read the caller environment, or infer a working directory.
+/// `process_command` is the explicit launch-mode path. The older `command`
+/// field is retained for low-level tmux-compatible specs where a single item
+/// means `$SHELL -c`; new SDK surfaces should use [`ProcessSpec::argv`],
+/// [`ProcessSpec::shell`], or the matching session/pane builders rather than
+/// struct literals.
 #[derive(Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessSpec {
-    /// Optional command argv. Protocol handlers decide how a single argument
-    /// is executed; the SDK does not parse or rewrite it.
+    /// Legacy optional command vector. A single item keeps the historical
+    /// `$SHELL -c` behavior in protocol handlers.
     #[serde(default)]
     pub command: Option<Vec<String>>,
+    /// Explicit process launch mode.
+    #[serde(default)]
+    pub process_command: Option<ProcessCommandSpec>,
     /// Optional per-spawn environment overrides in `NAME=VALUE` form.
     #[serde(default)]
     pub environment: Option<Vec<String>>,
+}
+
+impl ProcessSpec {
+    /// Creates a process spec that executes direct argv.
+    #[must_use]
+    pub fn argv<I, S>(command: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            process_command: Some(ProcessCommandSpec::Argv(
+                command.into_iter().map(Into::into).collect(),
+            )),
+            ..Self::default()
+        }
+    }
+
+    /// Creates a process spec that executes command text through the shell.
+    #[must_use]
+    pub fn shell(command: impl Into<String>) -> Self {
+        Self {
+            process_command: Some(ProcessCommandSpec::Shell(command.into())),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn into_proto_parts(
+        self,
+    ) -> (
+        Option<Vec<String>>,
+        Option<rmux_proto::ProcessCommand>,
+        Option<Vec<String>>,
+    ) {
+        (
+            self.command,
+            self.process_command.map(rmux_proto::ProcessCommand::from),
+            self.environment,
+        )
+    }
 }
 
 impl fmt::Debug for ProcessSpec {
@@ -32,6 +106,7 @@ impl fmt::Debug for ProcessSpec {
         formatter
             .debug_struct("ProcessSpec")
             .field("command", &self.command)
+            .field("process_command", &self.process_command)
             .finish_non_exhaustive()
     }
 }
@@ -139,12 +214,13 @@ pub struct NewSessionSpec {
 
 impl From<NewSessionSpec> for rmux_proto::NewSessionExtRequest {
     fn from(value: NewSessionSpec) -> Self {
+        let (command, process_command, environment) = value.process.into_proto_parts();
         Self {
             session_name: value.session_name,
             working_directory: value.working_directory,
             detached: value.detached,
             size: value.size.map(Into::into),
-            environment: value.process.environment,
+            environment,
             group_target: value.group_target,
             attach_if_exists: value.reuse.attach_if_exists,
             detach_other_clients: value.reuse.detach_other_clients,
@@ -153,7 +229,8 @@ impl From<NewSessionSpec> for rmux_proto::NewSessionExtRequest {
             window_name: value.window_name,
             print_session_info: value.print_session_info,
             print_format: value.print_format,
-            command: value.process.command,
+            command,
+            process_command,
         }
     }
 }
@@ -368,12 +445,16 @@ pub struct SplitSpec {
 
 impl From<SplitSpec> for rmux_proto::SplitWindowExtRequest {
     fn from(value: SplitSpec) -> Self {
+        let (command, process_command, environment) = value.process.into_proto_parts();
         Self {
             target: value.target.into(),
             direction: value.direction.into(),
             before: value.before,
-            environment: value.process.environment,
-            command: value.process.command,
+            environment,
+            command,
+            process_command,
+            start_directory: None,
+            keep_alive_on_exit: None,
         }
     }
 }

@@ -31,6 +31,9 @@ mod new_session;
 #[path = "handler_tests/kill_session.rs"]
 mod kill_session;
 
+#[path = "handler_tests/session_leases.rs"]
+mod session_leases;
+
 #[path = "handler_tests/clients.rs"]
 mod clients;
 

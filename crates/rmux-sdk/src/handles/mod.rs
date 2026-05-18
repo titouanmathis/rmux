@@ -5,6 +5,7 @@
 //! created or reused a live session.
 
 mod builder;
+mod owned_session;
 mod pane;
 mod rmux;
 pub(crate) mod session;
@@ -12,8 +13,11 @@ mod split;
 mod window;
 
 pub use builder::RmuxBuilder;
+pub use owned_session::{
+    CleanupPolicy, LeaseState, OwnedSession, OwnedSessionBuilder, OwnedSessionSignalHandlers,
+};
 pub(crate) use pane::is_already_closed_pane_error;
-pub use pane::{Pane, PaneCloseOutcome, PaneRespawnOptions};
+pub use pane::{Pane, PaneCloseOutcome, PaneRespawnOptions, PaneSpawnBuilder, PaneSplitBuilder};
 pub(crate) use rmux::connect_transport_to_endpoint;
 pub use rmux::Rmux;
 pub use session::Session;

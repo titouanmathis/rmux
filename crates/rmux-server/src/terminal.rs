@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use rmux_core::{EnvironmentStore, OptionStore, PaneId};
-use rmux_proto::{AttachShellCommand, OptionName, RmuxError, SessionName};
+use rmux_proto::{AttachShellCommand, OptionName, ProcessCommand, RmuxError, SessionName};
 use rmux_pty::{ChildCommand, PtyChild, PtyMaster, TerminalSize as PtyTerminalSize};
 use tokio::runtime::Handle;
 
@@ -209,7 +209,7 @@ impl TerminalProfile {
             .or_else(|| shell_program_name(&self.shell))
     }
 
-    pub(crate) fn automatic_window_name(&self, command: Option<&[String]>) -> Option<String> {
+    pub(crate) fn automatic_window_name(&self, command: Option<&ProcessCommand>) -> Option<String> {
         if command.is_some() {
             self.runtime_window_name(command)
         } else {
@@ -217,14 +217,14 @@ impl TerminalProfile {
         }
     }
 
-    pub(crate) fn runtime_window_name(&self, command: Option<&[String]>) -> Option<String> {
+    pub(crate) fn runtime_window_name(&self, command: Option<&ProcessCommand>) -> Option<String> {
         match command {
-            Some([single]) => {
-                shell_command_window_name(single).or_else(|| shell_program_name(&self.shell))
+            Some(ProcessCommand::Shell(command)) => {
+                shell_command_window_name(command).or_else(|| shell_program_name(&self.shell))
             }
-            Some(argv) if !argv.is_empty() => executable_name(&argv[0]),
+            Some(ProcessCommand::Argv(argv)) if !argv.is_empty() => executable_name(&argv[0]),
             None => shell_program_name(&self.shell),
-            Some(_) => shell_program_name(&self.shell),
+            Some(ProcessCommand::Argv(_)) | Some(_) => shell_program_name(&self.shell),
         }
     }
 }
@@ -237,8 +237,9 @@ fn shell_command_window_name(command: &str) -> Option<String> {
 pub(crate) fn spawn_pane_process(
     size: PtyTerminalSize,
     profile: &TerminalProfile,
-    command: Option<&[String]>,
+    command: Option<&ProcessCommand>,
 ) -> Result<(PtyMaster, PtyChild), RmuxError> {
+    validate_process_command(command)?;
     let mut command = spawn_command(profile, command)
         .size(size)
         .clear_env()
@@ -248,21 +249,31 @@ pub(crate) fn spawn_pane_process(
         command = command.env(name, value);
     }
 
-    let spawned = command
-        .spawn()
-        .map_err(|error| RmuxError::Server(format!("failed to spawn pane shell: {error}")))?;
+    let spawned = command.spawn().map_err(|error| {
+        RmuxError::spawn_failed(format!(
+            "{} shell: {error}",
+            rmux_proto::SPAWN_FAILED_MESSAGE_PREFIX
+        ))
+    })?;
     let (master, child) = spawned.into_parts();
     Ok((master, child))
 }
 
-fn spawn_command(profile: &TerminalProfile, command: Option<&[String]>) -> ChildCommand {
+pub(crate) fn validate_process_command(command: Option<&ProcessCommand>) -> Result<(), RmuxError> {
+    if command.is_some_and(ProcessCommand::is_empty) {
+        return Err(RmuxError::empty_process_command());
+    }
+    Ok(())
+}
+
+fn spawn_command(profile: &TerminalProfile, command: Option<&ProcessCommand>) -> ChildCommand {
     match command {
-        Some([single]) => profile.shell_child_command(single),
-        Some(argv) if !argv.is_empty() => {
+        Some(ProcessCommand::Shell(command)) => profile.shell_child_command(command),
+        Some(ProcessCommand::Argv(argv)) if !argv.is_empty() => {
             let program = resolve_program_path(Path::new(&argv[0]), &profile.environment);
             ChildCommand::new(program).args(&argv[1..])
         }
-        _ => profile.interactive_child_command(),
+        Some(ProcessCommand::Argv(_)) | Some(_) | None => profile.interactive_child_command(),
     }
 }
 

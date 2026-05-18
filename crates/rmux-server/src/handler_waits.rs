@@ -3,12 +3,14 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use rmux_core::events::{OutputCursorItem, OutputGap, SdkWaitKey, SdkWaitRegistry};
 use rmux_proto::{
-    CancelSdkWaitRequest, CancelSdkWaitResponse, ErrorResponse, Response, RmuxError,
+    CancelSdkWaitRequest, CancelSdkWaitResponse, ErrorResponse, PaneOutputSubscriptionStart,
+    PaneTarget, PaneTargetRef, Response, RmuxError, SdkWaitForOutputRefRequest,
     SdkWaitForOutputRequest, SdkWaitForOutputResponse, SdkWaitId, SdkWaitOutcome, SdkWaitOwnerId,
 };
 use tokio::sync::oneshot;
 
 use crate::pane_io::PaneOutputReceiver;
+use crate::pane_terminals::{session_not_found, HandlerState};
 
 use super::RequestHandler;
 
@@ -199,7 +201,43 @@ impl RequestHandler {
         connection_id: u64,
         request: SdkWaitForOutputRequest,
     ) -> Response {
-        if request.bytes.is_empty() {
+        self.sdk_wait_for_output(
+            connection_id,
+            request.owner_id,
+            request.wait_id,
+            PaneTargetRef::slot(request.target),
+            request.bytes,
+            request.start,
+        )
+        .await
+    }
+
+    pub(in crate::handler) async fn handle_sdk_wait_for_output_ref(
+        &self,
+        connection_id: u64,
+        request: SdkWaitForOutputRefRequest,
+    ) -> Response {
+        self.sdk_wait_for_output(
+            connection_id,
+            request.owner_id,
+            request.wait_id,
+            request.target,
+            request.bytes,
+            request.start,
+        )
+        .await
+    }
+
+    async fn sdk_wait_for_output(
+        &self,
+        connection_id: u64,
+        owner_id: SdkWaitOwnerId,
+        wait_id: SdkWaitId,
+        target_ref: PaneTargetRef,
+        bytes: Vec<u8>,
+        start: PaneOutputSubscriptionStart,
+    ) -> Response {
+        if bytes.is_empty() {
             return Response::Error(ErrorResponse {
                 error: RmuxError::Server("SDK wait bytes must not be empty".to_owned()),
             });
@@ -207,18 +245,22 @@ impl RequestHandler {
 
         let mut receiver = {
             let state = self.state.lock().await;
+            let target = match resolve_pane_target_ref(&state, &target_ref) {
+                Ok(target) => target,
+                Err(error) => return Response::Error(ErrorResponse { error }),
+            };
             let output = match state.pane_output_for_target(
-                request.target.session_name(),
-                request.target.window_index(),
-                request.target.pane_index(),
+                target.session_name(),
+                target.window_index(),
+                target.pane_index(),
             ) {
                 Ok(output) => output,
                 Err(error) => return Response::Error(ErrorResponse { error }),
             };
 
-            match request.start {
-                rmux_proto::PaneOutputSubscriptionStart::Now => output.subscribe(),
-                rmux_proto::PaneOutputSubscriptionStart::Oldest => output.subscribe_from_oldest(),
+            match start {
+                PaneOutputSubscriptionStart::Now => output.subscribe(),
+                PaneOutputSubscriptionStart::Oldest => output.subscribe_from_oldest(),
             }
         };
 
@@ -227,11 +269,11 @@ impl RequestHandler {
                 .sdk_waits
                 .lock()
                 .expect("SDK wait registry mutex must not be poisoned");
-            match waits.register(connection_id, request.owner_id, request.wait_id) {
+            match waits.register(connection_id, owner_id, wait_id) {
                 Ok(SdkWaitRegistration::Registered(receiver)) => receiver,
                 Ok(SdkWaitRegistration::CancelledBeforeRegistration) => {
                     return Response::SdkWaitForOutput(SdkWaitForOutputResponse {
-                        wait_id: request.wait_id,
+                        wait_id,
                         outcome: SdkWaitOutcome::Cancelled,
                     });
                 }
@@ -239,28 +281,24 @@ impl RequestHandler {
             }
         };
 
-        let mut guard = RegisteredSdkWaitGuard::new(
-            Arc::clone(&self.sdk_waits),
-            request.owner_id,
-            request.wait_id,
-        );
-        let outcome = wait_for_bytes(&mut receiver, &request.bytes, cancel_receiver).await;
+        let mut guard = RegisteredSdkWaitGuard::new(Arc::clone(&self.sdk_waits), owner_id, wait_id);
+        let outcome = wait_for_bytes(&mut receiver, &bytes, cancel_receiver).await;
         match outcome {
             SdkWaitOutcome::Matched => {
                 let removed = self
                     .sdk_waits
                     .lock()
                     .expect("SDK wait registry mutex must not be poisoned")
-                    .complete(request.owner_id, request.wait_id);
+                    .complete(owner_id, wait_id);
                 guard.disarm();
                 if removed {
                     Response::SdkWaitForOutput(SdkWaitForOutputResponse {
-                        wait_id: request.wait_id,
+                        wait_id,
                         outcome: SdkWaitOutcome::Matched,
                     })
                 } else {
                     Response::SdkWaitForOutput(SdkWaitForOutputResponse {
-                        wait_id: request.wait_id,
+                        wait_id,
                         outcome: SdkWaitOutcome::Cancelled,
                     })
                 }
@@ -268,7 +306,7 @@ impl RequestHandler {
             SdkWaitOutcome::Cancelled => {
                 guard.disarm();
                 Response::SdkWaitForOutput(SdkWaitForOutputResponse {
-                    wait_id: request.wait_id,
+                    wait_id,
                     outcome: SdkWaitOutcome::Cancelled,
                 })
             }
@@ -295,6 +333,42 @@ impl RequestHandler {
             .lock()
             .expect("SDK wait registry mutex must not be poisoned")
             .remove_connection(connection_id);
+    }
+}
+
+fn resolve_pane_target_ref(
+    state: &HandlerState,
+    target: &PaneTargetRef,
+) -> Result<PaneTarget, RmuxError> {
+    match target {
+        PaneTargetRef::Slot(target) => Ok(target.clone()),
+        PaneTargetRef::Id {
+            session_name,
+            pane_id,
+        } => {
+            let session = state
+                .sessions
+                .session(session_name)
+                .ok_or_else(|| session_not_found(session_name))?;
+            let window_index = session
+                .window_index_for_pane_id(*pane_id)
+                .ok_or_else(|| RmuxError::pane_not_found(session_name.clone(), *pane_id))?;
+            let pane_index = session
+                .window_at(window_index)
+                .and_then(|window| {
+                    window
+                        .panes()
+                        .iter()
+                        .find(|pane| pane.id() == *pane_id)
+                        .map(|pane| pane.index())
+                })
+                .ok_or_else(|| RmuxError::pane_not_found(session_name.clone(), *pane_id))?;
+            Ok(PaneTarget::with_window(
+                session_name.clone(),
+                window_index,
+                pane_index,
+            ))
+        }
     }
 }
 

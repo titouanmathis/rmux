@@ -8,8 +8,8 @@ use rmux_core::{
     Session, SessionStore,
 };
 use rmux_proto::{
-    KillPaneResponse, KillWindowResponse, OptionName, PaneTarget, RmuxError, SessionName,
-    WindowTarget,
+    KillPaneResponse, KillWindowResponse, OptionName, PaneTarget, ProcessCommand, RmuxError,
+    SessionName, WindowTarget,
 };
 
 use crate::pane_io::{PaneAlertCallback, PaneExitCallback, PaneOutputSender};
@@ -58,7 +58,7 @@ use window_links::{WindowLinkGroup, WindowLinkSlot};
 #[derive(Clone)]
 pub(crate) struct WindowSpawnOptions<'a> {
     pub(crate) start_directory: Option<&'a Path>,
-    pub(crate) command: Option<&'a [String]>,
+    pub(crate) command: Option<&'a ProcessCommand>,
     pub(crate) socket_path: &'a Path,
     pub(crate) environment_overrides: Option<&'a [String]>,
     pub(crate) pane_alert_callback: Option<PaneAlertCallback>,

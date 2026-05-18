@@ -118,6 +118,14 @@ impl TransportClient {
         self.state.sdk_wait_owner_id()
     }
 
+    pub(crate) async fn cached_capabilities(&self) -> Option<Arc<[String]>> {
+        self.state.cached_capabilities().await
+    }
+
+    pub(crate) async fn cache_capabilities(&self, capabilities: Vec<String>) -> Arc<[String]> {
+        self.state.cache_capabilities(capabilities).await
+    }
+
     pub(crate) fn allocate_sdk_wait_id(&self) -> SdkWaitId {
         self.state.allocate_sdk_wait_id()
     }

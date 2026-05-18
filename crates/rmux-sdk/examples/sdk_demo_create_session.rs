@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
     sdk_demo_helpers::paint_idle_prompt(&session).await?;
 
     // example:start
-    use rmux_sdk::{EnsureSession, ProcessSpec, Rmux, TerminalSizeSpec};
+    use rmux_sdk::{EnsureSession, Rmux, TerminalSizeSpec};
     let rmux = Rmux::builder().connect_or_start().await?;
     let _session = rmux
         .ensure_session(
@@ -27,10 +27,8 @@ async fn main() -> Result<()> {
                 .create_or_reuse()
                 .detached(true)
                 .size(TerminalSizeSpec::new(80, 24))
-                .process(ProcessSpec {
-                    command: Some(vec!["bash".into(), "-i".into()]),
-                    environment: Some(vec!["EDITOR=nvim".into(), "PROJECT_ROOT=/srv/app".into()]),
-                }),
+                .argv(["bash", "-i"])
+                .environment(["EDITOR=nvim", "PROJECT_ROOT=/srv/app"]),
         )
         .await?;
     // example:end

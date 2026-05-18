@@ -144,6 +144,43 @@ fn protocol_error_display_wraps_source() {
 }
 
 #[test]
+fn typed_proto_runtime_errors_map_without_text_parsing() {
+    let pane_not_found = RmuxError::from(rmux_proto::RmuxError::PaneNotFound {
+        session_name: rmux_proto::SessionName::new("alpha").expect("valid session"),
+        pane_id: rmux_proto::PaneId::new(42),
+    });
+    assert!(matches!(
+        pane_not_found,
+        RmuxError::PaneNotFound {
+            pane_id,
+            ..
+        } if pane_id == rmux_proto::PaneId::new(42)
+    ));
+
+    let still_running = RmuxError::from(rmux_proto::RmuxError::ProcessStillRunning);
+    assert!(matches!(
+        still_running,
+        RmuxError::ProcessStillRunning { .. }
+    ));
+
+    let spawn_failed = RmuxError::from(rmux_proto::RmuxError::SpawnFailed {
+        message: "failed to spawn pane shell: denied".to_owned(),
+    });
+    assert!(matches!(
+        spawn_failed,
+        RmuxError::SpawnFailed { ref message, .. } if message.contains("denied")
+    ));
+
+    let lease_lost = RmuxError::from(rmux_proto::RmuxError::OwnedSessionLeaseLost {
+        session_name: rmux_proto::SessionName::new("owned").expect("valid session"),
+    });
+    assert!(matches!(
+        lease_lost,
+        RmuxError::OwnedSessionLeaseLost { ref message, .. } if message.contains("owned")
+    ));
+}
+
+#[test]
 fn transport_error_display_wraps_source() {
     let error = RmuxError::transport(
         "connect to unix socket",

@@ -64,6 +64,7 @@ pub(super) fn run_respawn_pane(
                 start_directory: args.start_directory,
                 environment: (!args.environment.is_empty()).then_some(args.environment),
                 command: (!args.command.is_empty()).then_some(args.command),
+                process_command: None,
             })
             .map_err(ExitFailure::from_client)
     })

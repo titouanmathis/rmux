@@ -25,6 +25,7 @@ const PANE_INFO_FORMAT: &str =
 
 #[derive(Debug, Clone)]
 pub(super) struct ListedPane {
+    pub(super) window_index: u32,
     pub(super) pane_index: u32,
     pub(super) pane_id: PaneId,
 }
@@ -256,20 +257,54 @@ pub(super) async fn current_pane_entry(
     client: &TransportClient,
     target: &PaneRef,
 ) -> Result<Option<ListedPane>> {
-    match list_pane_entries(client, target).await {
-        Ok(entries) => Ok(entries
-            .into_iter()
-            .find(|entry| entry.pane_index == target.pane_index)),
+    match list_window_pane_entries(client, target).await {
+        Ok(entries) => Ok(entries.into_iter().find(|entry| {
+            entry.window_index == target.window_index && entry.pane_index == target.pane_index
+        })),
         Err(error) if is_already_closed_error(&error, target) => Ok(None),
         Err(error) => Err(error),
     }
 }
 
-async fn list_pane_entries(client: &TransportClient, target: &PaneRef) -> Result<Vec<ListedPane>> {
+pub(super) async fn current_pane_ref_for_id(
+    client: &TransportClient,
+    session_name: &rmux_proto::SessionName,
+    pane_id: PaneId,
+) -> Result<Option<PaneRef>> {
+    let target = PaneRef::new(session_name.clone(), 0, 0);
+    match list_all_pane_entries(client, &target).await {
+        Ok(entries) => Ok(entries
+            .into_iter()
+            .find(|entry| entry.pane_id == pane_id)
+            .map(|entry| PaneRef::new(session_name.clone(), entry.window_index, entry.pane_index))),
+        Err(error) if is_already_closed_error(&error, &target) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+async fn list_window_pane_entries(
+    client: &TransportClient,
+    target: &PaneRef,
+) -> Result<Vec<ListedPane>> {
+    list_pane_entries(client, target, Some(target.window_index)).await
+}
+
+async fn list_all_pane_entries(
+    client: &TransportClient,
+    target: &PaneRef,
+) -> Result<Vec<ListedPane>> {
+    list_pane_entries(client, target, None).await
+}
+
+async fn list_pane_entries(
+    client: &TransportClient,
+    target: &PaneRef,
+    target_window_index: Option<u32>,
+) -> Result<Vec<ListedPane>> {
     let response = client
         .request(Request::ListPanes(ListPanesRequest {
             target: target.session_name.clone(),
-            target_window_index: Some(target.window_index),
+            target_window_index,
             format: Some(PANE_LIST_FORMAT.to_owned()),
         }))
         .await?;
@@ -281,7 +316,7 @@ async fn list_pane_entries(client: &TransportClient, target: &PaneRef) -> Result
 
     String::from_utf8_lossy(&output)
         .lines()
-        .map(|line| parse_pane_list_line(target, line))
+        .map(parse_pane_list_line)
         .collect()
 }
 
@@ -369,7 +404,7 @@ fn parse_session_line(line: &str) -> Result<ListedSession> {
     })
 }
 
-fn parse_pane_list_line(target: &PaneRef, line: &str) -> Result<ListedPane> {
+fn parse_pane_list_line(line: &str) -> Result<ListedPane> {
     let mut fields = line.split(':');
     let window_index = fields
         .next()
@@ -385,14 +420,8 @@ fn parse_pane_list_line(target: &PaneRef, line: &str) -> Result<ListedPane> {
     }
 
     let window_index = parse_u32(window_index, "pane list window index")?;
-    if window_index != target.window_index {
-        return Err(parse_error(format!(
-            "list-panes returned window index {window_index} for target {}",
-            target.to_proto()
-        )));
-    }
-
     Ok(ListedPane {
+        window_index,
         pane_index: parse_u32(pane_index, "pane index")?,
         pane_id: parse_pane_id(pane_id)?,
     })

@@ -10,9 +10,7 @@
 
 use std::time::Duration;
 
-use rmux_sdk::{
-    EnsureSession, EnsureSessionPolicy, ProcessSpec, Rmux, SessionName, TerminalSizeSpec,
-};
+use rmux_sdk::{EnsureSession, EnsureSessionPolicy, Rmux, SessionName, TerminalSizeSpec};
 
 #[tokio::main]
 async fn main() -> rmux_sdk::Result<()> {
@@ -32,10 +30,6 @@ async fn main() -> rmux_sdk::Result<()> {
                 .policy(EnsureSessionPolicy::CreateOrReuse)
                 .detached(true)
                 .size(TerminalSizeSpec::new(120, 32))
-                .process(ProcessSpec {
-                    command: None,
-                    environment: None,
-                })
                 .window_name("main"),
         )
         .await?;

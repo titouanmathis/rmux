@@ -13,6 +13,7 @@ use rmux_proto::{
 
 use crate::format_runtime::{render_runtime_template, RuntimeFormatContext};
 use crate::hook_runtime::PendingInlineHookFormat;
+use crate::terminal::validate_process_command;
 
 #[path = "handler_session/list.rs"]
 mod list;
@@ -49,6 +50,7 @@ impl RequestHandler {
                 print_session_info: false,
                 print_format: None,
                 command: None,
+                process_command: None,
             },
         )
         .await
@@ -108,6 +110,12 @@ impl RequestHandler {
         let group_target = request.group_target;
         let working_directory = request.working_directory;
         let command = request.command;
+        let process_command = request
+            .process_command
+            .or_else(|| rmux_proto::ProcessCommand::from_legacy_command(command.as_deref()));
+        if let Err(error) = validate_process_command(process_command.as_ref()) {
+            return Response::Error(ErrorResponse { error });
+        }
         let requested_name = request.session_name;
         let socket_path = self.socket_path();
         let client_environment = client_environment_snapshot(requester_pid);
@@ -205,7 +213,7 @@ impl RequestHandler {
                     &session_name,
                     &socket_path,
                     environment_overrides.as_deref(),
-                    command.as_deref(),
+                    process_command.as_ref(),
                     Some(self.pane_alert_callback()),
                     Some(self.pane_exit_callback()),
                 ) {
@@ -412,6 +420,7 @@ impl RequestHandler {
         for event in queued_session_closed {
             self.emit_prepared(event);
         }
+        self.remove_session_leases(&sessions_to_remove);
 
         let _ = self.queue_shutdown_if_server_empty().await;
 

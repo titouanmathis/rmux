@@ -23,15 +23,18 @@ use rmux_proto::{
     DetachClientRequest, ErrorResponse, FrameDecoder, FrameDirection, FrameFeature, FrameKind,
     FrameStatus, HandshakeRequest, HandshakeResponse, HasSessionRequest, HasSessionResponse,
     HookLifecycle, HookName, KillServerResponse, KillSessionRequest, ListBuffersRequest,
-    NewSessionResponse, OptionName, PaneOutputCursor, PaneOutputCursorRequest,
-    PaneOutputCursorResponse, PaneOutputEvent, PaneOutputLagNotice, PaneOutputLagResponse,
-    PaneOutputSubscriptionId, PaneOutputSubscriptionStart, PaneRecentOutput, PaneSnapshotCursor,
-    PaneSnapshotResponse, PaneTarget, Request, ResolveTargetRequest, ResolveTargetType, Response,
-    RmuxError, ScopeSelector, SdkWaitForOutputRequest, SdkWaitForOutputResponse, SdkWaitId,
-    SdkWaitOutcome, SdkWaitOwnerId, SendKeysRequest, SendKeysResponse, SessionName, SetHookRequest,
-    SetOptionMode, SetOptionRequest, SubscribePaneOutputRequest, SubscribePaneOutputResponse,
-    TerminalSize, UnsubscribePaneOutputRequest, UnsubscribePaneOutputResponse, WindowTarget,
-    RMUX_FRAME_MAGIC, RMUX_WIRE_VERSION, V1_FRAME_LEDGER,
+    NewSessionResponse, OptionName, PaneId, PaneInputRequest, PaneKillRequest, PaneOutputCursor,
+    PaneOutputCursorRequest, PaneOutputCursorResponse, PaneOutputEvent, PaneOutputLagNotice,
+    PaneOutputLagResponse, PaneOutputSubscriptionId, PaneOutputSubscriptionStart, PaneRecentOutput,
+    PaneResizeRequest, PaneRespawnRequest, PaneSelectRequest, PaneSnapshotCursor,
+    PaneSnapshotRefRequest, PaneSnapshotResponse, PaneTarget, PaneTargetRef, Request,
+    ResizePaneAdjustment, ResolveTargetRequest, ResolveTargetType, Response, RmuxError,
+    ScopeSelector, SdkWaitForOutputRefRequest, SdkWaitForOutputRequest, SdkWaitForOutputResponse,
+    SdkWaitId, SdkWaitOutcome, SdkWaitOwnerId, SendKeysRequest, SendKeysResponse, SessionName,
+    SetHookRequest, SetOptionMode, SetOptionRequest, SubscribePaneOutputRefRequest,
+    SubscribePaneOutputRequest, SubscribePaneOutputResponse, TerminalSize,
+    UnsubscribePaneOutputRequest, UnsubscribePaneOutputResponse, WindowTarget, RMUX_FRAME_MAGIC,
+    RMUX_WIRE_VERSION, V1_FRAME_LEDGER,
 };
 
 fn fixture_root() -> PathBuf {
@@ -427,6 +430,7 @@ fn payload_only_bincode_roundtrip_supplements_full_frame_coverage() {
 fn cross_section_requests() -> Vec<Request> {
     let alpha = alpha();
     let pane = pane_alpha_2();
+    let pane_ref = PaneTargetRef::by_id(alpha.clone(), PaneId::new(9));
     vec![
         Request::HasSession(HasSessionRequest {
             target: alpha.clone(),
@@ -497,6 +501,10 @@ fn cross_section_requests() -> Vec<Request> {
             target: pane.clone(),
             start: PaneOutputSubscriptionStart::Now,
         }),
+        Request::SubscribePaneOutputRef(SubscribePaneOutputRefRequest {
+            target: PaneTargetRef::slot(pane.clone()),
+            start: PaneOutputSubscriptionStart::Now,
+        }),
         Request::UnsubscribePaneOutput(UnsubscribePaneOutputRequest {
             subscription_id: PaneOutputSubscriptionId::new(7),
         }),
@@ -507,13 +515,49 @@ fn cross_section_requests() -> Vec<Request> {
         Request::SdkWaitForOutput(SdkWaitForOutputRequest {
             owner_id: SdkWaitOwnerId::new(3),
             wait_id: SdkWaitId::new(4),
-            target: pane,
+            target: pane.clone(),
+            bytes: b"ready".to_vec(),
+            start: PaneOutputSubscriptionStart::Now,
+        }),
+        Request::SdkWaitForOutputRef(SdkWaitForOutputRefRequest {
+            owner_id: SdkWaitOwnerId::new(3),
+            wait_id: SdkWaitId::new(5),
+            target: PaneTargetRef::slot(pane),
             bytes: b"ready".to_vec(),
             start: PaneOutputSubscriptionStart::Now,
         }),
         Request::CancelSdkWait(CancelSdkWaitRequest {
             owner_id: SdkWaitOwnerId::new(3),
             wait_id: SdkWaitId::new(4),
+        }),
+        Request::PaneInput(PaneInputRequest {
+            target: pane_ref.clone(),
+            keys: vec!["ready".to_owned()],
+            literal: true,
+        }),
+        Request::PaneResize(PaneResizeRequest {
+            target: pane_ref.clone(),
+            adjustment: ResizePaneAdjustment::AbsoluteWidth { columns: 80 },
+        }),
+        Request::PaneKill(PaneKillRequest {
+            target: pane_ref.clone(),
+            kill_all_except: false,
+        }),
+        Request::PaneRespawn(PaneRespawnRequest {
+            target: pane_ref.clone(),
+            kill: true,
+            start_directory: Some(std::path::PathBuf::from("/tmp")),
+            environment: Some(vec!["RMUX_TEST=1".to_owned()]),
+            command: Some(vec!["printf".to_owned(), "ready".to_owned()]),
+            process_command: None,
+            keep_alive_on_exit: Some(true),
+        }),
+        Request::PaneSnapshotRef(PaneSnapshotRefRequest {
+            target: pane_ref.clone(),
+        }),
+        Request::PaneSelect(PaneSelectRequest {
+            target: pane_ref,
+            title: Some("agent".to_owned()),
         }),
     ]
 }
@@ -706,8 +750,8 @@ fn ledger_active_size_matches_request_and_response_variant_count() {
         .iter()
         .filter(|entry| matches!(entry.status, FrameStatus::Active))
         .count();
-    // Active entries = 100 Request variants + 87 Response variants.
-    assert_eq!(active_count, 100 + 87, "active ledger size mismatch");
+    // Active entries = 107 Request variants + 88 Response variants.
+    assert_eq!(active_count, 112 + 91, "active ledger size mismatch");
 }
 
 #[test]

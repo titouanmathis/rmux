@@ -42,6 +42,7 @@ fn endpoint_value_objects_round_trip() {
 fn process_subscription_reuse_and_terminal_specs_round_trip() {
     round_trip(ProcessSpec {
         command: Some(vec!["printf".to_owned(), "ok".to_owned()]),
+        process_command: None,
         environment: Some(vec!["A=B".to_owned()]),
     });
     round_trip(SubscriptionSpec {
@@ -99,6 +100,7 @@ fn new_session_spec_round_trip_and_maps_reuse_flags() {
         size: Some(TerminalSizeSpec::new(100, 30)),
         process: ProcessSpec {
             command: Some(vec!["top".to_owned()]),
+            process_command: None,
             environment: Some(vec!["TERM=xterm-256color".to_owned()]),
         },
         group_target: Some(session_name("group")),
@@ -227,6 +229,7 @@ fn split_spec_round_trip_and_maps_direction_and_target() {
         before: false,
         process: ProcessSpec {
             command: Some(vec!["htop".to_owned()]),
+            process_command: None,
             environment: Some(vec!["A=B".to_owned()]),
         },
     });
@@ -347,6 +350,7 @@ fn explicit_empty_options_are_not_normalized_away_in_proto_mappings() {
     let new_session = NewSessionSpec {
         process: ProcessSpec {
             command: Some(Vec::new()),
+            process_command: None,
             environment: Some(Vec::new()),
         },
         reuse: NewSessionReuse {
@@ -393,6 +397,7 @@ fn explicit_empty_options_are_not_normalized_away_in_proto_mappings() {
         before: false,
         process: ProcessSpec {
             command: Some(Vec::new()),
+            process_command: None,
             environment: Some(Vec::new()),
         },
     };
@@ -424,6 +429,9 @@ fn command_value_object_round_trip_and_materializes_proto_request() {
             before: false,
             environment: None,
             command: None,
+            process_command: None,
+            start_directory: None,
+            keep_alive_on_exit: None,
         })
     ));
 }

@@ -120,6 +120,7 @@ async fn grouped_new_session_without_explicit_name_uses_tmux_suffix_shape() {
             print_session_info: true,
             print_format: Some("#{session_name}".to_owned()),
             command: None,
+            process_command: None,
         }))
         .await;
 
@@ -180,6 +181,7 @@ async fn auto_named_session_uses_next_global_session_id_after_named_sessions() {
             print_session_info: true,
             print_format: Some("#{session_name}".to_owned()),
             command: None,
+            process_command: None,
         }))
         .await;
 
@@ -224,6 +226,7 @@ async fn grouped_new_session_rejects_shell_command_like_tmux() {
             print_session_info: false,
             print_format: None,
             command: Some(vec!["cat".to_owned()]),
+            process_command: None,
         }))
         .await;
 
@@ -264,6 +267,7 @@ async fn grouped_new_session_uses_next_global_session_id_suffix_when_group_is_ne
             print_session_info: true,
             print_format: Some("#{session_name}:#{session_group}".to_owned()),
             command: None,
+            process_command: None,
         }))
         .await;
 

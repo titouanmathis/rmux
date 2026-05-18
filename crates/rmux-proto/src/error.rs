@@ -3,6 +3,17 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::{PaneId, SessionName};
+
+/// Stable daemon message when a respawn refuses to replace a live pane.
+pub const PANE_STILL_ACTIVE_MESSAGE: &str = "pane still active; use -k to force respawn";
+/// Stable daemon message prefix for pane process spawn failures.
+pub const SPAWN_FAILED_MESSAGE_PREFIX: &str = "failed to spawn pane";
+/// Stable daemon message when a structured process command is empty.
+pub const PROCESS_COMMAND_EMPTY_MESSAGE: &str = "process command must not be empty";
+/// Stable daemon message prefix for owned-session lease loss.
+pub const OWNED_SESSION_LEASE_LOST_MESSAGE_PREFIX: &str = "owned session lease lost";
+
 /// Shared protocol and validation errors.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Error)]
 pub enum RmuxError {
@@ -87,6 +98,29 @@ pub enum RmuxError {
     /// Bincode decoding failed.
     #[error("failed to decode frame payload: {0}")]
     Decode(String),
+    /// A stable pane id did not resolve in the addressed session.
+    #[error("invalid target '{session_name}:{pane_id}': pane id does not exist in session")]
+    PaneNotFound {
+        /// Session searched for the pane id.
+        session_name: SessionName,
+        /// Stable pane id requested by the caller.
+        pane_id: PaneId,
+    },
+    /// A pane still has a running process and replacement was not requested.
+    #[error("{PANE_STILL_ACTIVE_MESSAGE}")]
+    ProcessStillRunning,
+    /// A daemon-side process spawn failed.
+    #[error("{message}")]
+    SpawnFailed {
+        /// Spawn failure diagnostic.
+        message: String,
+    },
+    /// A daemon-side owned-session lease was not found or no longer matches.
+    #[error("{OWNED_SESSION_LEASE_LOST_MESSAGE_PREFIX} for {session_name}")]
+    OwnedSessionLeaseLost {
+        /// Session whose lease no longer exists or no longer matches.
+        session_name: SessionName,
+    },
 }
 
 impl RmuxError {
@@ -98,11 +132,49 @@ impl RmuxError {
             reason: reason.into(),
         }
     }
+
+    /// Creates a stable-pane missing error.
+    #[must_use]
+    pub fn pane_not_found(session_name: SessionName, pane_id: PaneId) -> Self {
+        Self::PaneNotFound {
+            session_name,
+            pane_id,
+        }
+    }
+
+    /// Creates a typed spawn failure.
+    #[must_use]
+    pub fn spawn_failed(message: impl Into<String>) -> Self {
+        Self::SpawnFailed {
+            message: message.into(),
+        }
+    }
+
+    /// Creates a typed empty-process-command failure.
+    #[must_use]
+    pub fn empty_process_command() -> Self {
+        Self::spawn_failed(PROCESS_COMMAND_EMPTY_MESSAGE)
+    }
+
+    /// Creates a typed owned-session lease-lost error.
+    #[must_use]
+    pub fn owned_session_lease_lost(session_name: SessionName) -> Self {
+        Self::OwnedSessionLeaseLost { session_name }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::RmuxError;
+    use super::*;
+
+    fn bincode_tag(error: &RmuxError) -> u32 {
+        let encoded = bincode::serialize(error).expect("error encodes");
+        let tag = encoded
+            .get(..4)
+            .and_then(|bytes| bytes.try_into().ok())
+            .expect("enum tag is encoded as leading u32");
+        u32::from_le_bytes(tag)
+    }
 
     #[test]
     fn display_messages_are_stable() {
@@ -129,6 +201,29 @@ mod tests {
         assert_eq!(
             RmuxError::SessionNotFound("Alpha".to_owned()).to_string(),
             "session not found: Alpha"
+        );
+        assert_eq!(
+            RmuxError::pane_not_found(
+                crate::SessionName::new("Alpha").expect("valid session"),
+                crate::PaneId::new(7),
+            )
+            .to_string(),
+            "invalid target 'Alpha:%7': pane id does not exist in session"
+        );
+        assert_eq!(
+            RmuxError::ProcessStillRunning.to_string(),
+            PANE_STILL_ACTIVE_MESSAGE
+        );
+        assert_eq!(
+            RmuxError::empty_process_command().to_string(),
+            PROCESS_COMMAND_EMPTY_MESSAGE
+        );
+        assert_eq!(
+            RmuxError::owned_session_lease_lost(
+                crate::SessionName::new("leased").expect("valid session"),
+            )
+            .to_string(),
+            "owned session lease lost for leased"
         );
         assert_eq!(
             RmuxError::Server("pty resize failed".to_owned()).to_string(),
@@ -190,6 +285,80 @@ mod tests {
         assert_eq!(
             RmuxError::Decode("bincode error".to_owned()).to_string(),
             "failed to decode frame payload: bincode error"
+        );
+    }
+
+    #[test]
+    fn bincode_tags_append_new_variants_after_v1_errors() {
+        assert_eq!(bincode_tag(&RmuxError::EmptySessionName), 0);
+        assert_eq!(bincode_tag(&RmuxError::InvalidSessionNameCharacter), 1);
+        assert_eq!(
+            bincode_tag(&RmuxError::invalid_target("alpha:1", "missing pane")),
+            2
+        );
+        assert_eq!(bincode_tag(&RmuxError::UnknownCommand("run".to_owned())), 3);
+        assert_eq!(
+            bincode_tag(&RmuxError::DuplicateSession("alpha".to_owned())),
+            4
+        );
+        assert_eq!(
+            bincode_tag(&RmuxError::SessionNotFound("alpha".to_owned())),
+            5
+        );
+        assert_eq!(bincode_tag(&RmuxError::Server("failed".to_owned())), 6);
+        assert_eq!(bincode_tag(&RmuxError::Message("failed".to_owned())), 7);
+        assert_eq!(
+            bincode_tag(&RmuxError::InvalidSetOption("status".to_owned())),
+            8
+        );
+        assert_eq!(
+            bincode_tag(&RmuxError::FrameTooLarge {
+                length: 2,
+                maximum: 1,
+            }),
+            9
+        );
+        assert_eq!(bincode_tag(&RmuxError::EmptyFrame), 10);
+        assert_eq!(bincode_tag(&RmuxError::BadFrameMagic(0)), 11);
+        assert_eq!(
+            bincode_tag(&RmuxError::UnsupportedWireVersion {
+                got: 2,
+                minimum: 1,
+                maximum: 1,
+            }),
+            12
+        );
+        assert_eq!(
+            bincode_tag(&RmuxError::UnsupportedCapability {
+                feature: "future".to_owned(),
+                supported: vec![],
+            }),
+            13
+        );
+        assert_eq!(
+            bincode_tag(&RmuxError::IncompleteFrame {
+                expected: 2,
+                received: 1,
+            }),
+            14
+        );
+        assert_eq!(bincode_tag(&RmuxError::Encode("failed".to_owned())), 15);
+        assert_eq!(bincode_tag(&RmuxError::Decode("failed".to_owned())), 16);
+
+        assert_eq!(
+            bincode_tag(&RmuxError::pane_not_found(
+                SessionName::new("alpha").expect("valid session"),
+                PaneId::new(7),
+            )),
+            17
+        );
+        assert_eq!(bincode_tag(&RmuxError::ProcessStillRunning), 18);
+        assert_eq!(bincode_tag(&RmuxError::spawn_failed("failed")), 19);
+        assert_eq!(
+            bincode_tag(&RmuxError::owned_session_lease_lost(
+                SessionName::new("alpha").expect("valid session"),
+            )),
+            20
         );
     }
 }

@@ -221,6 +221,9 @@ async fn attach_session_replays_all_visible_pane_screens() {
                 before: false,
                 environment: None,
                 command: Some(quiet_ready_command(bottom_ready)),
+                process_command: None,
+                start_directory: None,
+                keep_alive_on_exit: None,
             }))
             .await,
         Response::SplitWindow(_)

@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use rmux_sdk::{EnsureSession, ProcessSpec, Rmux, Session, TerminalSizeSpec};
+use rmux_sdk::{EnsureSession, Rmux, Session, TerminalSizeSpec};
 
 #[cfg(unix)]
 fn shell_command() -> [&'static str; 3] {
@@ -52,14 +52,8 @@ pub(crate) async fn demo_session(name: &str) -> rmux_sdk::Result<(Rmux, Session)
                 .create_or_reuse()
                 .detached(true)
                 .size(TerminalSizeSpec::new(80, 24))
-                .process(ProcessSpec {
-                    command: Some(shell_command().into_iter().map(String::from).collect()),
-                    environment: Some(vec![
-                        "LC_ALL=C.UTF-8".to_owned(),
-                        "TZ=UTC".to_owned(),
-                        "TERM=xterm-256color".to_owned(),
-                    ]),
-                }),
+                .argv(shell_command())
+                .environment(["LC_ALL=C.UTF-8", "TZ=UTC", "TERM=xterm-256color"]),
         )
         .await?;
     let pane = session.pane(0, 0);
@@ -177,10 +171,8 @@ pub(crate) async fn throwaway_session(rmux: &Rmux, name: &str) -> rmux_sdk::Resu
             .create_or_reuse()
             .detached(true)
             .size(TerminalSizeSpec::new(80, 24))
-            .process(ProcessSpec {
-                command: Some(shell_command().into_iter().map(String::from).collect()),
-                environment: Some(vec!["LC_ALL=C.UTF-8".to_owned()]),
-            }),
+            .argv(shell_command())
+            .environment(["LC_ALL=C.UTF-8"]),
     )
     .await
 }

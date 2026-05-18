@@ -45,7 +45,7 @@ async fn attached_remain_on_exit_strips_the_submitted_exit_line_from_dead_pane_c
     );
     if default_shell_window_name() == "bash" {
         assert!(
-            capture.contains("logout"),
+            capture.contains("logout") || capture.contains("déconnexion"),
             "dead pane capture should preserve bash post-exit output, got {capture:?}"
         );
     }

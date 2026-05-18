@@ -10,7 +10,7 @@ use std::fmt::Debug;
 
 use rmux_sdk::{
     PaneLagNotice, PaneLineItem, PaneLineStream, PaneOutputChunk, PaneOutputStart,
-    PaneOutputStream, PaneRecentOutput,
+    PaneOutputStream, PaneRecentOutput, PaneRenderStream, RenderUpdate,
 };
 
 fn assert_send<T: Send>() {}
@@ -46,4 +46,12 @@ fn pane_output_stream_public_types_are_send_static_and_debuggable() {
     assert_send::<PaneOutputStart>();
     assert_static::<PaneOutputStart>();
     assert_debug::<PaneOutputStart>();
+
+    assert_send::<PaneRenderStream>();
+    assert_static::<PaneRenderStream>();
+    assert_debug::<PaneRenderStream>();
+
+    assert_send::<RenderUpdate>();
+    assert_static::<RenderUpdate>();
+    assert_debug::<RenderUpdate>();
 }

@@ -150,6 +150,7 @@ async fn ci_runner_collects_initial_process_burst_oldest_without_keepalive_windo
                         "RMUX_PROCESS_BURST_END",
                         7,
                     )),
+                    process_command: None,
                     environment: None,
                 }),
         )
@@ -305,6 +306,7 @@ async fn warm_reconnect_keeps_existing_runtime_windows() -> TestResult {
             .detached(true)
             .process(ProcessSpec {
                 command: Some(cmd_interactive_command()),
+                process_command: None,
                 environment: None,
             }),
     )

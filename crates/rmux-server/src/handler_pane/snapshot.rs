@@ -11,6 +11,7 @@ use rmux_proto::{
 
 use super::super::RequestHandler;
 use crate::pane_terminal_lookup::pane_id_for_target;
+use crate::pane_terminals::HandlerState;
 
 /// Saturating cast for cursor coordinates emitted by `Screen::cursor_position`.
 ///
@@ -32,7 +33,14 @@ impl RequestHandler {
         request: PaneSnapshotRequest,
     ) -> Response {
         let state = self.state.lock().await;
-        let target = &request.target;
+        self.handle_resolved_pane_snapshot(&state, &request.target)
+    }
+
+    pub(in crate::handler) fn handle_resolved_pane_snapshot(
+        &self,
+        state: &HandlerState,
+        target: &rmux_proto::PaneTarget,
+    ) -> Response {
         let pane_id = match pane_id_for_target(
             &state.sessions,
             target.session_name(),

@@ -2,14 +2,15 @@ use std::path::Path;
 
 use rmux_core::PaneId;
 use rmux_proto::{
-    KillPaneResponse, PaneTarget, RespawnPaneRequest, RespawnPaneResponse, RmuxError, SessionName,
+    KillPaneResponse, PaneTarget, ProcessCommand, RespawnPaneRequest, RespawnPaneResponse,
+    RmuxError, SessionName,
 };
 use rmux_pty::PtyMaster;
 
 use crate::pane_io::{PaneAlertCallback, PaneExitCallback};
 use crate::pane_terminal_lookup::initial_pane;
 use crate::pane_terminal_process::{open_pane_terminal, PaneTerminal};
-use crate::terminal::TerminalProfile;
+use crate::terminal::{validate_process_command, TerminalProfile};
 
 use super::lifecycle_state::terminal_size_from_geometry;
 use super::{
@@ -37,7 +38,7 @@ impl HandlerState {
         session_name: &SessionName,
         socket_path: &Path,
         environment_overrides: Option<&[String]>,
-        command: Option<&[String]>,
+        command: Option<&ProcessCommand>,
         pane_alert_callback: Option<PaneAlertCallback>,
         pane_exit_callback: Option<PaneExitCallback>,
     ) -> Result<(), RmuxError> {
@@ -106,7 +107,7 @@ impl HandlerState {
             session_id,
             window_id,
             pane_id: pane.id,
-            command: command.map(<[String]>::to_vec),
+            command: command.map(ProcessCommand::display_command),
             working_directory: Some(lifecycle_cwd),
             private_environment: environment_overrides.map(<[String]>::to_vec),
             dimensions: terminal_size_from_geometry(pane.geometry),
@@ -242,7 +243,7 @@ impl HandlerState {
             session_id,
             window_id,
             pane_id,
-            command: spawn.command.map(<[String]>::to_vec),
+            command: spawn.command.map(ProcessCommand::display_command),
             working_directory: Some(lifecycle_cwd),
             private_environment: spawn.environment_overrides.map(<[String]>::to_vec),
             dimensions: terminal_size_from_geometry(pane_geometry),
@@ -431,7 +432,11 @@ impl HandlerState {
             start_directory,
             environment,
             command,
+            process_command,
         } = request;
+        let process_command =
+            process_command.or_else(|| ProcessCommand::from_legacy_command(command.as_deref()));
+        validate_process_command(process_command.as_ref())?;
         let session_name = target.session_name().clone();
         let window_index = target.window_index();
         let pane_index = target.pane_index();
@@ -471,9 +476,7 @@ impl HandlerState {
             pane_index,
         )?;
         if pane_was_alive && !kill {
-            return Err(RmuxError::Server(
-                "pane still active; use -k to force respawn".to_owned(),
-            ));
+            return Err(RmuxError::ProcessStillRunning);
         }
 
         let profile = TerminalProfile::for_session(
@@ -487,14 +490,14 @@ impl HandlerState {
             Some(pane_id),
             start_directory.as_deref().or(requested_cwd),
         )?;
-        let automatic_window_name = profile.automatic_window_name(command.as_deref());
-        let runtime_window_name = profile.runtime_window_name(command.as_deref());
+        let automatic_window_name = profile.automatic_window_name(process_command.as_ref());
+        let runtime_window_name = profile.runtime_window_name(process_command.as_ref());
         let lifecycle_cwd = profile.cwd().to_path_buf();
         let terminal = open_pane_terminal(
             pane_geometry,
             profile,
             runtime_window_name.clone(),
-            command.as_deref(),
+            process_command.as_ref(),
         )?;
         let pid = terminal.pid();
         let output_reader = clone_terminal_for_output_reader(&terminal, &session_name, pane_id)?;
@@ -542,7 +545,9 @@ impl HandlerState {
             session_id,
             window_id,
             pane_id,
-            command,
+            command: process_command
+                .as_ref()
+                .map(ProcessCommand::display_command),
             working_directory: Some(lifecycle_cwd),
             private_environment: environment,
             dimensions: terminal_size_from_geometry(pane_geometry),

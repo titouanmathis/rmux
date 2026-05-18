@@ -177,6 +177,7 @@ async fn ci_runner_collects_initial_process_burst_oldest_without_keepalive() -> 
                         )
                         .to_owned(),
                     ]),
+                    process_command: None,
                     environment: None,
                 }),
         )
@@ -286,6 +287,7 @@ while True:
                 .detached(true)
                 .process(ProcessSpec {
                     command: Some(vec![python, "-c".to_owned(), script.to_owned()]),
+                    process_command: None,
                     environment: None,
                 }),
         )
@@ -325,6 +327,7 @@ async fn dashboard_snapshot_updates_are_revision_gated() -> TestResult {
                         "-c".to_owned(),
                         format!("sleep 1; printf '{marker}\\n'; sleep 2"),
                     ]),
+                    process_command: None,
                     environment: None,
                 }),
         )
@@ -525,6 +528,7 @@ async fn sdk_daemon_continues_stopped_initial_pane_process() -> TestResult {
                         "-c".to_owned(),
                         format!("kill -STOP $$; printf '{marker}\\n'; sleep 1"),
                     ]),
+                    process_command: None,
                     environment: None,
                 }),
         )

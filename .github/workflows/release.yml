@@ -67,6 +67,14 @@ jobs:
       - name: Build rmux
         run: cargo build --package rmux --locked --release --target "${{ matrix.target }}"
 
+      - name: Re-sign macOS binary
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bin="target/$TARGET/release/$BINARY"
+          codesign --force --sign - "$bin"
+          codesign --verify --verbose=2 "$bin"
+
       - name: Smoke binary
         shell: bash
         run: |

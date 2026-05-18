@@ -2,7 +2,7 @@
 //!
 //! The layout builder is SDK-side composition. It creates panes through the
 //! public split/spawn surfaces, asks the daemon to spread the resulting tree,
-//! and returns stable [`PaneSet`](crate::PaneSet) handles in declaration order.
+//! and returns stable [`PaneSet`] handles in declaration order.
 
 use std::path::PathBuf;
 

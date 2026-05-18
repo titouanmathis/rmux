@@ -2,7 +2,7 @@
 //!
 //! A locator is a retryable query against rendered terminal text. It does not
 //! model a DOM tree and does not infer hidden input fields; every match comes
-//! from the latest [`PaneSnapshot`](crate::PaneSnapshot) visible grid.
+//! from the latest [`PaneSnapshot`] visible grid.
 
 use std::future::{Future, IntoFuture};
 use std::pin::Pin;

@@ -30,7 +30,11 @@
 
 ## RMUX を選ぶ理由
 
-RMUX は Linux、macOS、Windows でターミナルセッションを動かしたまま、スクリプト可能で検査できる状態にします。shell では超高速な tmux 互換マルチプレクサとして、Rust からは永続セッション、スナップショット、locator、型付きオーケストレーションの自動化エンジンとして使えます。
+RMUX は、tmux の使い道にはまだ十分に掘り下げられていない部分がある、という考えから生まれました。最初の動機は単純でした。SSH 越しに長時間動く agents を実行し、そのターミナルを失わずに、周囲の状態を検査し、スクリプト化し、編成したかったのです。
+
+そこで、その考えを Rust でゼロから作り直しました。超高速な tmux 互換マルチプレクサ、型付き SDK、永続セッション、構造化スナップショット、そして Linux、macOS、Windows のネイティブなローカル transport を備えています。Windows Named Pipes も含み、WSL は不要です。
+
+RMUX は agents、headless CLI workflows、人間のどれにも使えます。ターミナルアプリに detachable な実行を与え、あとから再接続し、状態を検査し、コードから操作できます。あるいは、普通の tmux 風ターミナル作業にもそのまま使えます。
 
 **完全なドキュメント:** [rmux.io/docs](https://rmux.io/docs/) · [はじめる](https://rmux.io/docs/get-started/) · [Examples](https://rmux.io/docs/examples/) · [API](https://rmux.io/docs/api/) · [CLI](https://rmux.io/docs/cli/)
 

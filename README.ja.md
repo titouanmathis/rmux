@@ -28,13 +28,27 @@
 > [!IMPORTANT]
 > 現在のリリースは **v0.2.0**、公開日は **2026年5月18日**。tmux 互換の 90 コマンドはすべて実装済みですが、まだ新しい public preview のため bug が残る可能性があります。問題は [issues](https://github.com/helvesec/rmux/issues) へ報告できます。
 
-## RMUX が提供するもの
+## RMUX を選ぶ理由
 
-- **tmux-style CLI**: sessions、windows、panes、buffers、hooks、formats、copy mode、control mode、一般的なターミナル workflow に対応。
-- **Rust SDK**: sessions の作成、panes の split、型付き input の送信、snapshots の読み取り、pane output の購読、text/bytes の待機、clean shutdown に対応。
-- **ratatui widget**: pane snapshots を `ratatui::buffer::Buffer` に描画。draw path で async work は不要。
-- **ネイティブなローカル runtime support**: Linux/macOS は Unix PTY と Unix sockets、Windows は ConPTY と named pipes。WSL は不要。
-- **小さな公開 crate set**: 内部実装 crates は public package surface の外に保持。
+RMUX は、tmux の使い道にはまだ十分に掘り下げられていない部分がある、という考えから生まれました。最初の動機は単純でした。SSH 越しに長時間動く agents を実行し、そのターミナルを失わずに、周囲の状態を検査し、スクリプト化し、編成したかったのです。
+
+そこで、その考えを Rust でゼロから作り直しました。超高速な tmux 互換マルチプレクサ、型付き SDK、永続セッション、構造化スナップショット、そして Linux、macOS、Windows のネイティブなローカル transport を備えています。Windows Named Pipes も含み、WSL は不要です。
+
+RMUX は agents、headless CLI workflows、人間のどれにも使えます。ターミナルアプリに detachable な実行を与え、あとから再接続し、状態を検査し、コードから操作できます。あるいは、普通の tmux 風ターミナル作業にもそのまま使えます。
+
+## デモ
+
+RMUX を何に使えるかを示す短い実例です。
+
+<table>
+  <tr>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-orchestration"><img src="https://rmux.io/demos/demo-orchestration.png" width="150" alt="マルチエージェント編成デモのプレビュー"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/demo-orchestration"><strong>マルチエージェント編成</strong></a></sub><br><sub>≃ 514 lines</sub></td>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-broadcast"><img src="https://rmux.io/demos/demo-broadcast.png" width="150" alt="Agent Broadcast Arena デモのプレビュー"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/broadcast-demo"><strong>Agent Broadcast Arena</strong></a></sub><br><sub>≃ 2,171 lines</sub></td>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-zellij"><img src="https://rmux.io/demos/demo-zellij.png" width="150" alt="Mini-Zellij デモのプレビュー"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/mini-zellij"><strong>Mini-Zellij</strong></a></sub><br><sub>≃ 944 lines</sub></td>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-mirroring"><img src="https://rmux.io/demos/demo-mirroring.png" width="150" alt="ターミナルとブラウザのミラーリングデモのプレビュー"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/web-claude-demo"><strong>ターミナル &lt;&gt; ブラウザミラーリング</strong></a></sub><br><sub>≃ 649 lines</sub></td>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-playwright"><img src="https://rmux.io/demos/demo-playwright.png" width="150" alt="Playwright テストデモのプレビュー"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/terminal-playwright-demo"><strong>Playwright テスト</strong></a></sub><br><sub>≃ 1,495 lines</sub></td>
+  </tr>
+</table>
 
 <a id="install"></a>
 
@@ -72,6 +86,12 @@ Rust アプリケーション向け：
 cargo add rmux-sdk
 cargo add ratatui-rmux
 ```
+
+## Documentation
+
+RMUX の完全なドキュメントは [rmux.io/docs](https://rmux.io/docs/) で確認できます。
+
+[インストールガイド](https://rmux.io/docs/get-started/)、[CLI リファレンス](https://rmux.io/docs/cli/)、[SDK サンプル](https://rmux.io/docs/examples/)、[ターミナル自動化サンプル](https://rmux.io/docs/examples/#/terminal-playwright)、[API ドキュメント](https://rmux.io/docs/api/) を含みます。
 
 ## CLI Quickstart
 

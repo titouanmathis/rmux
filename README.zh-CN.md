@@ -28,13 +28,27 @@
 > [!IMPORTANT]
 > 当前版本：**v0.2.0**，发布于 **2026 年 5 月 18 日**。90 条 tmux-compatible commands 已全部实现，但这仍是新的公开预览版本，可能存在 bug。遇到问题时可在 [issues](https://github.com/helvesec/rmux/issues) 中反馈。
 
-## RMUX 提供什么
+## 为什么选择 RMUX
 
-- **tmux 风格 CLI**，覆盖 sessions、windows、panes、buffers、hooks、formats、copy mode、control mode 和常见终端工作流。
-- **Rust SDK**，用于创建 sessions、拆分 panes、发送类型化输入、读取 snapshots、订阅 pane output、等待文本或字节，并进行干净关闭。
-- **ratatui widget**，可把 pane snapshots 渲染到 `ratatui::buffer::Buffer`，绘制路径中不需要 async work。
-- **原生本地 runtime 支持**：Linux/macOS 使用 Unix PTY 和 Unix sockets；Windows 使用 ConPTY 和 named pipes，无需 WSL。
-- **小而清晰的已发布 crate 集合**，内部实现 crates 不暴露到公共 package surface。
+RMUX 的出发点很简单：我相信 tmux 的使用场景还只被探索了一部分。我最初的需求是通过 SSH 运行长期存在的 agents，同时不丢失它们的终端，并且仍然能够检查、脚本化和编排它们周围的一切。
+
+所以我用 Rust 从头重建了这个想法：一个极快、兼容 tmux 的终端复用器，带有类型化 SDK、持久会话、结构化快照，以及 Linux、macOS 和 Windows 上的原生本地传输，包括 Windows Named Pipes。无需 WSL。
+
+RMUX 可以给 agents 用，也可以给 headless CLI workflows 用，同样也适合人直接使用：你可以让终端应用获得可 detach 的执行方式，稍后重新连接，检查它们的状态，从代码驱动它们，或者只是把它当作普通的 tmux 风格终端工具。
+
+## 演示
+
+一些简短、真实的例子，展示 RMUX 可以用来做什么。
+
+<table>
+  <tr>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-orchestration"><img src="https://rmux.io/demos/demo-orchestration.png" width="150" alt="多智能体编排演示预览"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/demo-orchestration"><strong>多智能体编排</strong></a></sub><br><sub>≃ 514 lines</sub></td>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-broadcast"><img src="https://rmux.io/demos/demo-broadcast.png" width="150" alt="Agent Broadcast Arena 演示预览"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/broadcast-demo"><strong>Agent Broadcast Arena</strong></a></sub><br><sub>≃ 2,171 lines</sub></td>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-zellij"><img src="https://rmux.io/demos/demo-zellij.png" width="150" alt="Mini-Zellij 演示预览"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/mini-zellij"><strong>Mini-Zellij</strong></a></sub><br><sub>≃ 944 lines</sub></td>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-mirroring"><img src="https://rmux.io/demos/demo-mirroring.png" width="150" alt="终端浏览器镜像演示预览"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/web-claude-demo"><strong>终端 &lt;&gt; 浏览器镜像</strong></a></sub><br><sub>≃ 649 lines</sub></td>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-playwright"><img src="https://rmux.io/demos/demo-playwright.png" width="150" alt="Playwright 测试演示预览"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/terminal-playwright-demo"><strong>Playwright 测试</strong></a></sub><br><sub>≃ 1,495 lines</sub></td>
+  </tr>
+</table>
 
 <a id="install"></a>
 
@@ -72,6 +86,12 @@ Rust 应用：
 cargo add rmux-sdk
 cargo add ratatui-rmux
 ```
+
+## Documentation
+
+完整 RMUX 文档可在 [rmux.io/docs](https://rmux.io/docs/) 查看。
+
+其中包括[安装指南](https://rmux.io/docs/get-started/)、[CLI 参考](https://rmux.io/docs/cli/)、[SDK 示例](https://rmux.io/docs/examples/)、[终端自动化示例](https://rmux.io/docs/examples/#/terminal-playwright)，以及 [API 文档](https://rmux.io/docs/api/)。
 
 ## CLI 快速开始
 

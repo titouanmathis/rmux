@@ -28,13 +28,27 @@
 > [!IMPORTANT]
 > Version actuelle : **v0.2.0**, publiée le **18 mai 2026**. Les 90 commandes compatibles tmux sont implémentées, mais des bugs restent possibles : cette version est un aperçu public récent. [Signaler les problèmes](https://github.com/helvesec/rmux/issues) rencontrés.
 
-## Ce que RMUX fournit
+## Pourquoi RMUX
 
-- **Une CLI de style tmux** pour sessions, fenêtres, panes, buffers, hooks, formats, copy mode, control mode et workflows terminal courants.
-- **Un SDK Rust** pour créer des sessions, diviser des panes, envoyer des entrées typées, lire des snapshots, s'abonner à la sortie des panes, attendre du texte ou des octets, et arrêter proprement.
-- **Un widget ratatui** qui rend les snapshots de panes dans un `ratatui::buffer::Buffer` sans travail async dans le chemin de rendu.
-- **Un runtime local natif** : PTY Unix et sockets Unix sur Linux/macOS ; ConPTY et named pipes sur Windows, sans WSL.
-- **Un petit ensemble de crates publiées**, avec les crates d'implémentation interne hors de la surface publique.
+RMUX existe parce que je crois que le cas d'usage de tmux n'a ete explore qu'en partie. Mon point de depart etait simple : je voulais lancer des agents longue duree via SSH sans perdre leurs terminaux, tout en pouvant inspecter, scripter et orchestrer ce qui les entoure.
+
+J'ai donc reconstruit cette idee from scratch en Rust : un multiplexeur ultra-rapide compatible tmux, avec SDK type, sessions persistantes, snapshots structures et transports locaux natifs sur Linux, macOS et Windows, y compris les Windows Named Pipes. Pas besoin de WSL.
+
+RMUX est utilisable par les agents, les workflows CLI headless et les humains : vous pouvez donner une execution detachable aux applications terminal, vous reconnecter plus tard, inspecter leur etat, les piloter depuis du code, ou simplement l'utiliser pour du travail terminal classique façon tmux.
+
+## Démos
+
+Quelques exemples courts et concrets de ce que l'on peut faire avec RMUX.
+
+<table>
+  <tr>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-orchestration"><img src="https://rmux.io/demos/demo-orchestration.png" width="150" alt="Aperçu de la démo orchestration multi-agents"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/demo-orchestration"><strong>Orchestration multi-agents</strong></a></sub><br><sub>≃ 514 lines</sub></td>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-broadcast"><img src="https://rmux.io/demos/demo-broadcast.png" width="150" alt="Aperçu de la démo Agent Broadcast Arena"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/broadcast-demo"><strong>Agent Broadcast Arena</strong></a></sub><br><sub>≃ 2,171 lines</sub></td>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-zellij"><img src="https://rmux.io/demos/demo-zellij.png" width="150" alt="Aperçu de la démo Mini-Zellij"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/mini-zellij"><strong>Mini-Zellij</strong></a></sub><br><sub>≃ 944 lines</sub></td>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-mirroring"><img src="https://rmux.io/demos/demo-mirroring.png" width="150" alt="Aperçu de la démo miroir terminal navigateur"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/web-claude-demo"><strong>Miroir terminal &lt;&gt; navigateur</strong></a></sub><br><sub>≃ 649 lines</sub></td>
+    <td align="center" width="20%"><a href="https://rmux.io/#demo-playwright"><img src="https://rmux.io/demos/demo-playwright.png" width="150" alt="Aperçu de la démo tests Playwright"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/terminal-playwright-demo"><strong>Tests Playwright</strong></a></sub><br><sub>≃ 1,495 lines</sub></td>
+  </tr>
+</table>
 
 <a id="install"></a>
 
@@ -72,6 +86,12 @@ Pour les applications Rust :
 cargo add rmux-sdk
 cargo add ratatui-rmux
 ```
+
+## Documentation
+
+La documentation complète de RMUX est disponible sur [rmux.io/docs](https://rmux.io/docs/).
+
+Elle inclut des [guides d'installation](https://rmux.io/docs/get-started/), des [références CLI](https://rmux.io/docs/cli/), des [exemples SDK](https://rmux.io/docs/examples/), des [exemples d'automatisation terminal](https://rmux.io/docs/examples/#/terminal-playwright), et la [documentation API](https://rmux.io/docs/api/).
 
 ## Démarrage rapide CLI
 

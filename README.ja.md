@@ -28,13 +28,14 @@
 > [!IMPORTANT]
 > 現在のリリースは **v0.2.0**、公開日は **2026年5月18日**。tmux 互換の 90 コマンドはすべて実装済みですが、まだ新しい public preview のため bug が残る可能性があります。問題は [issues](https://github.com/helvesec/rmux/issues) へ報告できます。
 
-## RMUX が提供するもの
+## RMUX を選ぶ理由
 
-- **tmux-style CLI**: sessions、windows、panes、buffers、hooks、formats、copy mode、control mode、一般的なターミナル workflow に対応。
-- **Rust SDK**: sessions の作成、panes の split、型付き input の送信、snapshots の読み取り、pane output の購読、text/bytes の待機、clean shutdown に対応。
-- **ratatui widget**: pane snapshots を `ratatui::buffer::Buffer` に描画。draw path で async work は不要。
-- **ネイティブなローカル runtime support**: Linux/macOS は Unix PTY と Unix sockets、Windows は ConPTY と named pipes。WSL は不要。
-- **小さな公開 crate set**: 内部実装 crates は public package surface の外に保持。
+RMUX は Linux、macOS、Windows でターミナルセッションを動かしたまま、スクリプト可能で検査できる状態にします。shell では超高速な tmux 互換マルチプレクサとして、Rust からは永続セッション、スナップショット、locator、型付きオーケストレーションの自動化エンジンとして使えます。
+
+**完全なドキュメント:** [rmux.io/docs](https://rmux.io/docs/) · [はじめる](https://rmux.io/docs/get-started/) · [Examples](https://rmux.io/docs/examples/) · [API](https://rmux.io/docs/api/) · [CLI](https://rmux.io/docs/cli/)
+
+| [<img src="https://rmux.io/demos/demo-orchestration.png" width="150" alt="マルチエージェント編成デモのプレビュー">](https://rmux.io/demos/demo-orchestration.mp4)<br><sub>マルチエージェント編成</sub> | [<img src="https://rmux.io/demos/demo-broadcast.png" width="150" alt="Agent Broadcast Arena デモのプレビュー">](https://rmux.io/demos/demo-broadcast.mp4)<br><sub>Agent Broadcast Arena</sub> | [<img src="https://rmux.io/demos/demo-zellij.png" width="150" alt="Mini-Zellij デモのプレビュー">](https://rmux.io/demos/demo-zellij.mp4)<br><sub>Mini-Zellij</sub> | [<img src="https://rmux.io/demos/demo-mirroring.png" width="150" alt="ターミナルとブラウザのミラーリングデモのプレビュー">](https://rmux.io/demos/demo-mirroring.mp4)<br><sub>ターミナル &lt;&gt; ブラウザミラーリング</sub> | [<img src="https://rmux.io/demos/demo-playwright.png" width="150" alt="Playwright テストデモのプレビュー">](https://rmux.io/demos/demo-playwright.mp4)<br><sub>Playwright テスト</sub> |
+| --- | --- | --- | --- | --- |
 
 <a id="install"></a>
 

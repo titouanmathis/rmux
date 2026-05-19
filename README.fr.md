@@ -28,13 +28,14 @@
 > [!IMPORTANT]
 > Version actuelle : **v0.2.0**, publiée le **18 mai 2026**. Les 90 commandes compatibles tmux sont implémentées, mais des bugs restent possibles : cette version est un aperçu public récent. [Signaler les problèmes](https://github.com/helvesec/rmux/issues) rencontrés.
 
-## Ce que RMUX fournit
+## Pourquoi RMUX
 
-- **Une CLI de style tmux** pour sessions, fenêtres, panes, buffers, hooks, formats, copy mode, control mode et workflows terminal courants.
-- **Un SDK Rust** pour créer des sessions, diviser des panes, envoyer des entrées typées, lire des snapshots, s'abonner à la sortie des panes, attendre du texte ou des octets, et arrêter proprement.
-- **Un widget ratatui** qui rend les snapshots de panes dans un `ratatui::buffer::Buffer` sans travail async dans le chemin de rendu.
-- **Un runtime local natif** : PTY Unix et sockets Unix sur Linux/macOS ; ConPTY et named pipes sur Windows, sans WSL.
-- **Un petit ensemble de crates publiées**, avec les crates d'implémentation interne hors de la surface publique.
+RMUX garde les sessions de terminal actives, scriptables et inspectables sur Linux, macOS et Windows. Utilisez-le comme multiplexeur ultra-rapide compatible tmux depuis le shell, ou comme moteur Rust pour automatiser des sessions persistantes, snapshots, locators et orchestration typée.
+
+**Docs complètes :** [rmux.io/docs](https://rmux.io/docs/) · [Démarrer](https://rmux.io/docs/get-started/) · [Exemples](https://rmux.io/docs/examples/) · [API](https://rmux.io/docs/api/) · [CLI](https://rmux.io/docs/cli/)
+
+| [<img src="https://rmux.io/demos/demo-orchestration.png" width="150" alt="Aperçu de la démo orchestration multi-agents">](https://rmux.io/demos/demo-orchestration.mp4)<br><sub>Orchestration multi-agents</sub> | [<img src="https://rmux.io/demos/demo-broadcast.png" width="150" alt="Aperçu de la démo Agent Broadcast Arena">](https://rmux.io/demos/demo-broadcast.mp4)<br><sub>Agent Broadcast Arena</sub> | [<img src="https://rmux.io/demos/demo-zellij.png" width="150" alt="Aperçu de la démo Mini-Zellij">](https://rmux.io/demos/demo-zellij.mp4)<br><sub>Mini-Zellij</sub> | [<img src="https://rmux.io/demos/demo-mirroring.png" width="150" alt="Aperçu de la démo miroir terminal navigateur">](https://rmux.io/demos/demo-mirroring.mp4)<br><sub>Miroir terminal &lt;&gt; navigateur</sub> | [<img src="https://rmux.io/demos/demo-playwright.png" width="150" alt="Aperçu de la démo tests Playwright">](https://rmux.io/demos/demo-playwright.mp4)<br><sub>Tests Playwright</sub> |
+| --- | --- | --- | --- | --- |
 
 <a id="install"></a>
 

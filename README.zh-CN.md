@@ -28,13 +28,14 @@
 > [!IMPORTANT]
 > 当前版本：**v0.2.0**，发布于 **2026 年 5 月 18 日**。90 条 tmux-compatible commands 已全部实现，但这仍是新的公开预览版本，可能存在 bug。遇到问题时可在 [issues](https://github.com/helvesec/rmux/issues) 中反馈。
 
-## RMUX 提供什么
+## 为什么选择 RMUX
 
-- **tmux 风格 CLI**，覆盖 sessions、windows、panes、buffers、hooks、formats、copy mode、control mode 和常见终端工作流。
-- **Rust SDK**，用于创建 sessions、拆分 panes、发送类型化输入、读取 snapshots、订阅 pane output、等待文本或字节，并进行干净关闭。
-- **ratatui widget**，可把 pane snapshots 渲染到 `ratatui::buffer::Buffer`，绘制路径中不需要 async work。
-- **原生本地 runtime 支持**：Linux/macOS 使用 Unix PTY 和 Unix sockets；Windows 使用 ConPTY 和 named pipes，无需 WSL。
-- **小而清晰的已发布 crate 集合**，内部实现 crates 不暴露到公共 package surface。
+RMUX 让终端会话在 Linux、macOS 和 Windows 上保持运行、可脚本化、可检查。你可以把它当作极快、兼容 tmux 的 shell 复用器，也可以把它作为 Rust 自动化引擎，用于持久会话、快照、locator 和类型化编排。
+
+**完整文档：** [rmux.io/docs](https://rmux.io/docs/) · [快速开始](https://rmux.io/docs/get-started/) · [示例](https://rmux.io/docs/examples/) · [API](https://rmux.io/docs/api/) · [CLI](https://rmux.io/docs/cli/)
+
+| [<img src="https://rmux.io/demos/demo-orchestration.png" width="150" alt="多智能体编排演示预览">](https://rmux.io/demos/demo-orchestration.mp4)<br><sub>多智能体编排</sub> | [<img src="https://rmux.io/demos/demo-broadcast.png" width="150" alt="Agent Broadcast Arena 演示预览">](https://rmux.io/demos/demo-broadcast.mp4)<br><sub>Agent Broadcast Arena</sub> | [<img src="https://rmux.io/demos/demo-zellij.png" width="150" alt="Mini-Zellij 演示预览">](https://rmux.io/demos/demo-zellij.mp4)<br><sub>Mini-Zellij</sub> | [<img src="https://rmux.io/demos/demo-mirroring.png" width="150" alt="终端浏览器镜像演示预览">](https://rmux.io/demos/demo-mirroring.mp4)<br><sub>终端 &lt;&gt; 浏览器镜像</sub> | [<img src="https://rmux.io/demos/demo-playwright.png" width="150" alt="Playwright 测试演示预览">](https://rmux.io/demos/demo-playwright.mp4)<br><sub>Playwright 测试</sub> |
+| --- | --- | --- | --- | --- |
 
 <a id="install"></a>
 

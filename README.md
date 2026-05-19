@@ -36,6 +36,10 @@ So I rebuilt that idea from scratch in Rust: a blazing-fast, tmux-compatible mul
 
 RMUX is usable by agents, headless CLI workflows, and humans alike: you can give terminal apps detachable execution, reconnect later, inspect their state, drive them from code, or simply use it for normal tmux-style terminal work.
 
+## Demos
+
+Short, real examples of what RMUX can automate and orchestrate.
+
 <table>
   <tr>
     <td align="center" width="20%"><a href="https://rmux.io/#demo-orchestration"><img src="https://rmux.io/demos/demo-orchestration.png" width="150" alt="Multi Agents Orchestration demo preview"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/demo-orchestration"><strong>Multi Agents Orchestration</strong></a></sub><br><sub>≃ 514 lines</sub></td>

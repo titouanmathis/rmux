@@ -36,6 +36,10 @@ J'ai donc reconstruit cette idee from scratch en Rust : un multiplexeur ultra-ra
 
 RMUX est utilisable par les agents, les workflows CLI headless et les humains : vous pouvez donner une execution detachable aux applications terminal, vous reconnecter plus tard, inspecter leur etat, les piloter depuis du code, ou simplement l'utiliser pour du travail terminal classique façon tmux.
 
+## Démos
+
+Quelques exemples courts et concrets de ce que RMUX peut automatiser et orchestrer.
+
 <table>
   <tr>
     <td align="center" width="20%"><a href="https://rmux.io/#demo-orchestration"><img src="https://rmux.io/demos/demo-orchestration.png" width="150" alt="Aperçu de la démo orchestration multi-agents"></a><br><sub><a href="https://github.com/Helvesec/rmux-demos/tree/main/demo-orchestration"><strong>Orchestration multi-agents</strong></a></sub><br><sub>≃ 514 lines</sub></td>

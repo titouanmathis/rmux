@@ -11,7 +11,7 @@ This guide keeps RMUX defaults intact and shows one ergonomic user config you ca
 
 ## Starter config
 
-See [`docs/examples/wsl-human.conf`](examples/wsl-human.conf) for the full file.
+See [`docs/examples/wsl-human.conf`](examples/wsl-human.conf) for the full file and [`docs/examples/rmux-pane-shell`](examples/rmux-pane-shell) for the tiny helper used to preserve the current working directory on pane splits.
 
 ```tmux
 # Safer prefix for heavy shell work.
@@ -24,13 +24,15 @@ set -g mouse off
 bind T if-shell -F '#{mouse}' 'set -g mouse off \; display-message "mouse OFF: native terminal selection enabled"' 'set -g mouse on \; display-message "mouse ON: pane mouse mode enabled"'
 
 # Keep cwd when opening new panes or windows.
-bind % split-window -h -c "#{pane_current_path}"
-bind '"' split-window -v -c "#{pane_current_path}"
+# new-window supports -c, but split-window may not on current RMUX preview builds.
+# Use a tiny helper for cwd-preserving pane splits.
+bind % split-window -h ~/.local/bin/rmux-pane-shell "#{pane_current_path}"
+bind '"' split-window -v ~/.local/bin/rmux-pane-shell "#{pane_current_path}"
 bind c new-window -c "#{pane_current_path}"
 
 # Easier split bindings for keyboard layouts where %, ", or | are awkward.
-bind v split-window -h -c "#{pane_current_path}"
-bind b split-window -v -c "#{pane_current_path}"
+bind v split-window -h ~/.local/bin/rmux-pane-shell "#{pane_current_path}"
+bind b split-window -v ~/.local/bin/rmux-pane-shell "#{pane_current_path}"
 
 # WSL clipboard integration.
 set -s copy-command '/mnt/c/WINDOWS/System32/clip.exe'
@@ -50,6 +52,36 @@ A common compromise for interactive WSL usage is:
 - toggle it on only when you want pane mouse behavior with `prefix + T`
 
 Many terminals also offer a modifier such as `Shift` plus drag to force native selection even when the multiplexer has mouse mode enabled.
+
+## Cwd-preserving splits on current preview builds
+
+On current RMUX preview builds, `new-window --help` exposes `-c <cwd>`, but `split-window --help` may not. If you apply tmux-style `split-window -c "#{pane_current_path}"` blindly, RMUX can interpret `-c` as part of the child command instead of as a start-directory flag.
+
+The symptom can look like a blank pane, a dead pane, or an attach/detach feeling where the split appears and then immediately becomes unusable.
+
+The safe pattern is:
+
+1. keep `new-window -c "#{pane_current_path}"`
+2. use a small helper for pane splits that `cd`s into the requested path and then `exec`s the shell
+
+Example helper (also provided in [`docs/examples/rmux-pane-shell`](examples/rmux-pane-shell)):
+
+```bash
+#!/usr/bin/env bash
+set -e
+TARGET_DIR="${1:-$HOME}"
+if [ ! -d "$TARGET_DIR" ]; then
+  TARGET_DIR="$HOME"
+fi
+cd "$TARGET_DIR"
+exec "${SHELL:-/bin/bash}" -i
+```
+
+Install it locally with:
+
+```sh
+install -m 755 docs/examples/rmux-pane-shell ~/.local/bin/rmux-pane-shell
+```
 
 ## Keyboard-layout friendly splits
 

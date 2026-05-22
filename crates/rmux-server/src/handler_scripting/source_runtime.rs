@@ -15,9 +15,10 @@ use super::format_context::{format_context_for_target, parser_with_parse_time_co
 use super::queue::{QueueCommandAction, QueueExecutionContext};
 use super::source_files::{
     default_config_paths, default_tmux_fallback_paths, source_inputs_for_path, source_parse_error,
-    LoadedSourceFile, ParsedSourceFileCommand, SourceInput, SourcedParsedCommands,
+    LoadedSourceFile, ParsedSourceFileCommand, SourceInput, SourceSyntax, SourcedParsedCommands,
 };
 use super::targets::active_session_target;
+use super::tmux_compat::filter_tmux_compat_input;
 use crate::format_runtime::{render_runtime_template, RuntimeFormatContext};
 use crate::{ConfigFileSelection, ConfigLoadOptions};
 
@@ -42,7 +43,7 @@ impl RequestHandler {
 
         let command = ParsedSourceFileCommand {
             paths,
-            quiet: true,
+            quiet: config_load.quiet(),
             parse_only: false,
             verbose: false,
             expand_paths: false,
@@ -50,6 +51,7 @@ impl RequestHandler {
             caller_cwd: config_load.cwd().map(Path::to_path_buf),
             stdin: None,
             current_file: None,
+            syntax: SourceSyntax::Rmux,
         };
 
         let loaded = match self.load_source_file_command(&command, 1).await {
@@ -63,22 +65,24 @@ impl RequestHandler {
             }
         };
 
-        let (mut loaded, is_tmux_fallback) = if loaded.is_empty() && !tmux_fallback_paths.is_empty()
-        {
+        let should_load_tmux_fallback =
+            !loaded.loaded_any_file() && !loaded.has_errors() && !tmux_fallback_paths.is_empty();
+        let mut loaded = if should_load_tmux_fallback {
             let fallback_command = ParsedSourceFileCommand {
                 paths: tmux_fallback_paths,
                 quiet: true,
+                syntax: SourceSyntax::TmuxCompat,
                 ..command.clone()
             };
             match self.load_source_file_command(&fallback_command, 1).await {
-                Ok(loaded) => (loaded, true),
+                Ok(loaded) => loaded,
                 Err(_) => {
                     self.config_loading_depth.fetch_sub(1, Ordering::Relaxed);
                     return;
                 }
             }
         } else {
-            (loaded, false)
+            loaded
         };
 
         let mut errors = Vec::new();
@@ -94,9 +98,7 @@ impl RequestHandler {
             )
             .await
         {
-            if !is_tmux_fallback {
-                errors.push(error);
-            }
+            errors.push(error);
         }
         if queue_errors {
             if let Some(error) = super::aggregate_rmux_errors(errors) {
@@ -256,6 +258,7 @@ impl RequestHandler {
                 command.caller_cwd.as_deref(),
                 command.quiet,
                 command.stdin.as_deref(),
+                command.read_policy(),
             ) {
                 Ok(inputs) => inputs,
                 Err(error) => {
@@ -263,7 +266,17 @@ impl RequestHandler {
                     continue;
                 }
             };
+            if !inputs.is_empty() {
+                loaded.record_loaded_files(inputs.len());
+            }
             for input in inputs {
+                let input = match command.syntax {
+                    SourceSyntax::Rmux => input,
+                    SourceSyntax::TmuxCompat => filter_tmux_compat_input(&input),
+                };
+                if input.contents.trim().is_empty() {
+                    continue;
+                }
                 let parsed = match self
                     .parse_source_input(&input, command.target.as_ref())
                     .await
@@ -356,5 +369,168 @@ fn nonempty_stdout(stdout: Vec<u8>) -> Option<CommandOutput> {
         None
     } else {
         Some(CommandOutput::from_stdout(stdout))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::super::super::RequestHandler;
+    use crate::test_env::EnvVarGuard;
+    use crate::DaemonConfig;
+    use rmux_proto::OptionName;
+
+    #[tokio::test]
+    async fn tmux_fallback_is_not_used_after_rmux_config_load_error() {
+        let _lock = crate::test_env::lock_async().await;
+        let root = unique_temp_root("fallback-load-error");
+        let home = root.join("home");
+        let xdg = root.join("xdg");
+        fs::create_dir_all(&home).expect("home directory");
+        fs::create_dir_all(&xdg).expect("xdg directory");
+        fs::create_dir(home.join(".rmux.conf")).expect("directory that read_to_string rejects");
+        fs::write(home.join(".tmux.conf"), "set -g status off\n").expect("tmux fallback config");
+
+        let home_value = home.to_string_lossy().into_owned();
+        let xdg_value = xdg.to_string_lossy().into_owned();
+        let _disable = EnvVarGuard::set("RMUX_DISABLE_TMUX_FALLBACK", None);
+        let _home = EnvVarGuard::set("HOME", Some(&home_value));
+        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", Some(&xdg_value));
+        let handler = RequestHandler::new();
+        let config = DaemonConfig::new(root.join("rmux.sock")).with_default_config_load(true, None);
+
+        handler
+            .load_startup_config(config.config_load().clone())
+            .await;
+
+        let errors = handler.startup_config_errors.lock().await;
+        let rendered = errors
+            .first()
+            .expect("rmux config load error should be retained")
+            .to_string();
+        assert!(
+            rendered.contains(".rmux.conf"),
+            "expected rmux config load error, got {rendered}"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn tmux_fallback_imports_filtered_static_config_when_no_rmux_config_exists() {
+        let _lock = crate::test_env::lock_async().await;
+        let root = unique_temp_root("fallback-static-config");
+        let home = root.join("home");
+        let xdg = root.join("xdg");
+        fs::create_dir_all(&home).expect("home directory");
+        fs::create_dir_all(&xdg).expect("xdg directory");
+        fs::write(
+            home.join(".tmux.conf"),
+            "unbind-key -a\n\
+             if-shell 'test -f ~/.enable-rmux' {\n\
+             set -g status on\n\
+             }\n\
+             set -g status off\n\
+             run-shell 'touch /tmp/nope'\n",
+        )
+        .expect("tmux fallback config");
+
+        let home_value = home.to_string_lossy().into_owned();
+        let xdg_value = xdg.to_string_lossy().into_owned();
+        let _disable = EnvVarGuard::set("RMUX_DISABLE_TMUX_FALLBACK", None);
+        let _home = EnvVarGuard::set("HOME", Some(&home_value));
+        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", Some(&xdg_value));
+        let handler = RequestHandler::new();
+        let config = DaemonConfig::new(root.join("rmux.sock")).with_default_config_load(true, None);
+
+        handler
+            .load_startup_config(config.config_load().clone())
+            .await;
+
+        assert!(
+            handler.startup_config_errors.lock().await.is_empty(),
+            "tmux fallback import should be best-effort and error-free"
+        );
+        let state = handler.state.lock().await;
+        assert_eq!(state.options.global_value(OptionName::Status), Some("off"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn tmux_fallback_ignores_unreadable_entries_and_keeps_later_safe_files() {
+        let _lock = crate::test_env::lock_async().await;
+        let root = unique_temp_root("fallback-best-effort");
+        let home = root.join("home");
+        let xdg_tmux = root.join("xdg").join("tmux");
+        fs::create_dir_all(&home).expect("home directory");
+        fs::create_dir_all(&xdg_tmux).expect("xdg tmux directory");
+        fs::create_dir(home.join(".tmux.conf")).expect("unreadable directory entry");
+        fs::write(xdg_tmux.join("tmux.conf"), "set -g status off\n")
+            .expect("later tmux fallback config");
+
+        let home_value = home.to_string_lossy().into_owned();
+        let xdg_value = root.join("xdg").to_string_lossy().into_owned();
+        let _disable = EnvVarGuard::set("RMUX_DISABLE_TMUX_FALLBACK", None);
+        let _home = EnvVarGuard::set("HOME", Some(&home_value));
+        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", Some(&xdg_value));
+        let handler = RequestHandler::new();
+        let config = DaemonConfig::new(root.join("rmux.sock")).with_default_config_load(true, None);
+
+        handler
+            .load_startup_config(config.config_load().clone())
+            .await;
+
+        assert!(
+            handler.startup_config_errors.lock().await.is_empty(),
+            "tmux fallback read errors should be ignored"
+        );
+        let state = handler.state.lock().await;
+        assert_eq!(state.options.global_value(OptionName::Status), Some("off"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn tmux_fallback_can_be_disabled_by_env() {
+        let _lock = crate::test_env::lock_async().await;
+        let root = unique_temp_root("fallback-env-disabled");
+        let home = root.join("home");
+        let xdg = root.join("xdg");
+        fs::create_dir_all(&home).expect("home directory");
+        fs::create_dir_all(&xdg).expect("xdg directory");
+        fs::write(home.join(".tmux.conf"), "set -g status off\n").expect("tmux fallback config");
+
+        let home_value = home.to_string_lossy().into_owned();
+        let xdg_value = xdg.to_string_lossy().into_owned();
+        let _disable = EnvVarGuard::set("RMUX_DISABLE_TMUX_FALLBACK", Some("1"));
+        let _home = EnvVarGuard::set("HOME", Some(&home_value));
+        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", Some(&xdg_value));
+        let handler = RequestHandler::new();
+        let config = DaemonConfig::new(root.join("rmux.sock")).with_default_config_load(true, None);
+
+        handler
+            .load_startup_config(config.config_load().clone())
+            .await;
+
+        assert!(
+            handler.startup_config_errors.lock().await.is_empty(),
+            "disabled tmux fallback should not report config errors"
+        );
+        let state = handler.state.lock().await;
+        assert_ne!(state.options.global_value(OptionName::Status), Some("off"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn unique_temp_root(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("rmux-{label}-{}-{unique}", std::process::id()))
     }
 }

@@ -7,6 +7,11 @@ use rmux_proto::TerminalSize;
 
 pub(crate) type SharedPaneTranscript = Arc<Mutex<PaneTranscript>>;
 
+pub(crate) struct PaneAppendResult {
+    pub(crate) bell_count: u64,
+    pub(crate) replies: Vec<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PaneModeState {
     Copy(Box<CopyModeState>),
@@ -55,11 +60,20 @@ impl PaneTranscript {
     }
 
     pub(crate) fn append_bytes(&mut self, bytes: &[u8]) -> u64 {
+        self.append_bytes_and_take_replies(bytes).bell_count
+    }
+
+    pub(crate) fn append_bytes_and_take_replies(&mut self, bytes: &[u8]) -> PaneAppendResult {
         if !bytes.is_empty() {
             self.output_sequence = self.output_sequence.saturating_add(1);
         }
         self.terminal.feed(bytes);
-        self.terminal.screen_mut().take_bell_count()
+        let bell_count = self.terminal.screen_mut().take_bell_count();
+        let replies = self.terminal.take_replies();
+        PaneAppendResult {
+            bell_count,
+            replies,
+        }
     }
 
     pub(crate) const fn output_sequence(&self) -> u64 {
@@ -414,5 +428,16 @@ mod tests {
             .capture_copy_mode(ScreenCaptureRange::default(), GridRenderOptions::default())
             .expect("copy mode capture exists");
         assert!(String::from_utf8(capture).expect("utf8").contains("mode"));
+    }
+
+    #[test]
+    fn append_bytes_drains_terminal_replies_once() {
+        let mut transcript = transcript(8, 2, 10);
+
+        let result = transcript.append_bytes_and_take_replies(b"\x1b[c");
+        assert_eq!(result.replies, b"\x1b[?1;2c");
+
+        let result = transcript.append_bytes_and_take_replies(b"");
+        assert!(result.replies.is_empty());
     }
 }

@@ -55,6 +55,11 @@ impl TerminalScreen {
         self.parser.feed(bytes);
     }
 
+    /// Returns and drains terminal replies generated while parsing PTY output.
+    pub fn take_replies(&mut self) -> Vec<u8> {
+        self.parser.take_replies()
+    }
+
     /// Returns any bytes still buffered inside an incomplete parser state.
     #[must_use]
     pub fn pending_bytes(&self) -> Vec<u8> {

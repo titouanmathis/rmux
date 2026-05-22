@@ -3,7 +3,7 @@ use std::io;
 use rmux_core::PaneId;
 #[cfg(windows)]
 use rmux_pty::PtyChild;
-use rmux_pty::PtyMaster;
+use rmux_pty::{PtyIo, PtyMaster};
 use tracing::warn;
 
 #[cfg(unix)]
@@ -138,7 +138,7 @@ async fn read_pane_output(
     pane_alert_callback: Option<PaneAlertCallback>,
     pane_exit_callback: Option<PaneExitCallback>,
 ) -> io::Result<()> {
-    let pane_reader = open_pane_writer(pane_master)?;
+    let (pane_reader, reply_writer) = open_pane_writer(pane_master)?;
     let mut buffer = [0_u8; READ_BUFFER_SIZE];
 
     loop {
@@ -156,7 +156,7 @@ async fn read_pane_output(
         }
 
         let bytes = buffer[..bytes_read].to_vec();
-        publish_pane_bytes(
+        let replies = publish_pane_bytes(
             &session_name,
             pane_id,
             &transcript,
@@ -165,6 +165,7 @@ async fn read_pane_output(
             pane_alert_callback.as_ref(),
             bytes,
         );
+        write_parser_replies_to_pane(&reply_writer, replies).await?;
     }
 }
 
@@ -194,7 +195,7 @@ fn read_pane_output_blocking(
             return Ok(());
         }
 
-        publish_pane_bytes(
+        let replies = publish_pane_bytes(
             &session_name,
             pane_id,
             &transcript,
@@ -203,6 +204,7 @@ fn read_pane_output_blocking(
             pane_alert_callback.as_ref(),
             buffer[..bytes_read].to_vec(),
         );
+        write_parser_replies_to_pane_blocking(&pane_reader, replies)?;
     }
 }
 
@@ -214,26 +216,161 @@ fn publish_pane_bytes(
     generation: Option<u64>,
     pane_alert_callback: Option<&PaneAlertCallback>,
     bytes: Vec<u8>,
-) {
+) -> Vec<u8> {
     if !pane_output.accepts_generation(generation) {
-        return;
+        return Vec::new();
     }
-    let bell_count = {
+    let append_result = {
         let mut transcript = transcript
             .lock()
             .expect("pane transcript mutex must not be poisoned");
-        transcript.append_bytes(&bytes)
+        transcript.append_bytes_with_effects(&bytes)
     };
-    if pane_output.send_for_generation(generation, bytes).is_none() {
-        return;
+    let replies = append_result.replies;
+    let dropped_passthrough_count = append_result.dropped_passthrough_count;
+    if pane_output
+        .send_for_generation_with_passthroughs(generation, bytes, append_result.passthroughs)
+        .is_none()
+    {
+        return Vec::new();
+    }
+    if dropped_passthrough_count > 0 {
+        warn!(
+            session = %session_name,
+            pane_id = pane_id.as_u32(),
+            dropped = dropped_passthrough_count,
+            "dropped terminal passthrough events due to parser safety limits"
+        );
     }
     if let Some(callback) = pane_alert_callback {
         callback(PaneAlertEvent {
             session_name: session_name.clone(),
             pane_id,
-            bell_count,
+            bell_count: append_result.bell_count,
             generation,
         });
+    }
+    replies
+}
+
+#[cfg(unix)]
+async fn write_parser_replies_to_pane(pane_writer: &PtyIo, replies: Vec<u8>) -> io::Result<()> {
+    if replies.is_empty() {
+        return Ok(());
+    }
+    let pane_writer = pane_writer.try_clone().map_err(io::Error::other)?;
+    tokio::task::spawn_blocking(move || pane_writer.write_all(&replies))
+        .await
+        .map_err(|error| io::Error::other(format!("parser reply task failed: {error}")))?
+}
+
+#[cfg(windows)]
+fn write_parser_replies_to_pane_blocking(pane_writer: &PtyIo, replies: Vec<u8>) -> io::Result<()> {
+    if replies.is_empty() {
+        return Ok(());
+    }
+    pane_writer.write_all(&replies)
+}
+
+#[cfg(all(test, unix))]
+mod unix_tests {
+    use std::error::Error;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    use rmux_core::PaneId;
+    use rmux_proto::{SessionName, TerminalSize};
+    use rmux_pty::{ChildCommand, TerminalSize as PtyTerminalSize};
+
+    use super::spawn_pane_output_reader;
+    use crate::pane_io::pane_output_channel;
+    use crate::pane_transcript::PaneTranscript;
+
+    #[tokio::test]
+    async fn output_reader_writes_terminal_replies_back_to_pane() -> Result<(), Box<dyn Error>> {
+        if !python3_available() {
+            eprintln!("skipping terminal reply PTY test because python3 is unavailable");
+            return Ok(());
+        }
+        let output = unique_temp_path("terminal-reply");
+        let script = r#"
+import os, select, sys, termios, tty
+old = termios.tcgetattr(0)
+tty.setraw(0)
+try:
+    os.write(1, b"\x1b[c")
+    ready, _, _ = select.select([0], [], [], 2.0)
+    data = os.read(0, 64) if ready else b""
+    with open(sys.argv[1], "wb") as output:
+        output.write(data)
+finally:
+    termios.tcsetattr(0, termios.TCSANOW, old)
+"#;
+        let mut spawned = ChildCommand::new("python3")
+            .args(["-c", script, &output.display().to_string()])
+            .size(PtyTerminalSize::new(80, 24))
+            .spawn()?;
+        let output_reader = spawned.master().try_clone()?;
+        let transcript = PaneTranscript::shared(2_000, TerminalSize { cols: 80, rows: 24 });
+        let pane_output = pane_output_channel();
+
+        spawn_pane_output_reader(
+            SessionName::new("terminal-reply").expect("valid session name"),
+            PaneId::new(1),
+            output_reader,
+            transcript,
+            pane_output,
+            None,
+            None,
+            None,
+        );
+
+        let contents = wait_for_file_contents(&output, Duration::from_secs(4)).await?;
+        let _ = spawned.child_mut().wait();
+        let _ = fs::remove_file(&output);
+
+        assert_eq!(contents, b"\x1b[?1;2c");
+        Ok(())
+    }
+
+    fn python3_available() -> bool {
+        Command::new("python3")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    fn unique_temp_path(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "rmux-pane-reader-{label}-{}-{unique}",
+            std::process::id()
+        ))
+    }
+
+    async fn wait_for_file_contents(
+        path: &Path,
+        timeout: Duration,
+    ) -> Result<Vec<u8>, Box<dyn Error>> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match fs::read(path) {
+                Ok(contents) => return Ok(contents),
+                Err(_) if Instant::now() < deadline => {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+                Err(error) => {
+                    return Err(format!("timed out waiting for {}: {error}", path.display()).into());
+                }
+            }
+        }
     }
 }
 

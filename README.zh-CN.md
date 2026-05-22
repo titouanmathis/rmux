@@ -32,7 +32,7 @@
 
 RMUX 的出发点很简单：我相信 tmux 的使用场景还只被探索了一部分。我最初的需求是通过 SSH 运行长期存在的智能体，同时不丢失它们的终端，并且仍然能够检查、脚本化和编排它们周围的一切。
 
-所以我用 Rust 从头重建了这个想法：一个极快、兼容 tmux 的终端复用器，带有类型化 SDK、持久会话、结构化快照，以及 Linux、macOS 和 Windows 上的原生本地传输，包括 Windows Named Pipes。无需 WSL。
+所以我用 Rust 从头重建了这个想法：一个极快、兼容 tmux 的终端复用器，带有类型化 SDK、持久会话、结构化快照，以及 Linux、macOS 和 Windows 上的原生本地传输，包括 Windows Named Pipes。
 
 RMUX 可以给智能体用，也可以给无头 CLI 工作流用，同样也适合人直接使用：它可以让终端应用获得可分离的执行方式，稍后重新连接，检查它们的状态，从代码驱动它们，或者只是把它当作普通的 tmux 风格终端工具。
 
@@ -222,6 +222,23 @@ fn render(snapshot: PaneSnapshot, area: Rect, buffer: &mut Buffer) {
 2. `%USERPROFILE%\.rmux.conf`
 3. `%APPDATA%\rmux\rmux.conf`
 4. `%RMUX_CONFIG_FILE%`
+
+### `tmux.conf` 迁移回退
+
+当 RMUX 使用默认配置搜索启动，并且没有加载任何 RMUX 配置文件时，它可以读取经过过滤的
+`tmux.conf` 作为迁移回退。通过 `-f` 显式指定配置文件时，不会使用这个回退。
+
+回退查找位置：
+
+- Linux 和 macOS：`/etc/tmux.conf`、`~/.tmux.conf`、`$XDG_CONFIG_HOME/tmux/tmux.conf`、`~/.config/tmux/tmux.conf`
+- Windows：`%XDG_CONFIG_HOME%\tmux\tmux.conf`、`%USERPROFILE%\.tmux.conf`、`%APPDATA%\tmux\tmux.conf`
+
+导入范围刻意保持很窄：RMUX 只保留已支持的静态配置项和取消按键绑定，
+并跳过 tmux 按键绑定、环境或终端能力修改、插件用户配置项、hooks、
+shell 命令、命令块、条件块、`#(cmd)` 这样的格式任务、
+递归 `source-file` 条目，以及不支持的配置项，而不是执行它们。
+设置 `RMUX_DISABLE_TMUX_FALLBACK=1` 可以完全禁用该回退。
+回退文件按尽力原则读取；非普通文件和超过 1 MiB 的文件会被忽略。
 
 <a id="verification"></a>
 

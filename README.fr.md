@@ -32,7 +32,7 @@
 
 RMUX existe parce que je crois que le cas d'usage de tmux n'a été exploré qu'en partie. Mon point de départ était simple : lancer des agents longue durée via SSH sans perdre leurs terminaux, tout en pouvant inspecter, scripter et orchestrer ce qui les entoure.
 
-J'ai donc reconstruit cette idée à partir de zéro en Rust : un multiplexeur ultra-rapide compatible tmux, avec SDK typé, sessions persistantes, snapshots structurés et transports locaux natifs sur Linux, macOS et Windows, y compris les Windows Named Pipes. Pas besoin de WSL.
+J'ai donc reconstruit cette idée à partir de zéro en Rust : un multiplexeur ultra-rapide compatible tmux, avec SDK typé, sessions persistantes, snapshots structurés et transports locaux natifs sur Linux, macOS et Windows, y compris les Windows Named Pipes.
 
 RMUX est utilisable par les agents, les workflows CLI sans interface et les humains : il permet de donner une exécution détachable aux applications terminal, de se reconnecter plus tard, d'inspecter leur état, de les piloter depuis du code, ou simplement de s'en servir pour du travail terminal classique façon tmux.
 
@@ -222,6 +222,26 @@ Sur Windows, RMUX lit également `.rmux.conf`, depuis les emplacements suivants 
 2. `%USERPROFILE%\.rmux.conf`
 3. `%APPDATA%\rmux\rmux.conf`
 4. `%RMUX_CONFIG_FILE%`
+
+### Fallback de migration `tmux.conf`
+
+Quand RMUX démarre avec la recherche de configuration par défaut et qu'aucun
+fichier RMUX n'est chargé, il peut importer un `tmux.conf` filtré pour faciliter
+la migration. Un chargement explicite avec `-f` n'utilise pas ce fallback.
+
+Chemins de fallback :
+
+- Linux et macOS : `/etc/tmux.conf`, `~/.tmux.conf`, `$XDG_CONFIG_HOME/tmux/tmux.conf`, `~/.config/tmux/tmux.conf`
+- Windows : `%XDG_CONFIG_HOME%\tmux\tmux.conf`, `%USERPROFILE%\.tmux.conf`, `%APPDATA%\tmux\tmux.conf`
+
+L'import est volontairement limité : RMUX conserve les options statiques
+supportées et les suppressions de raccourcis, mais ignore les bindings tmux, les
+modifications d'environnement ou de capacités terminal, les options utilisateur
+de plugins, les hooks, les commandes shell, les blocs de commandes, les
+conditions, les jobs de format comme `#(cmd)`, les `source-file` récursifs et
+les options non supportées. Définissez `RMUX_DISABLE_TMUX_FALLBACK=1` pour le
+désactiver entièrement. Les fichiers de fallback sont lus au mieux : les fichiers
+non réguliers et les fichiers de plus de 1 MiB sont ignorés.
 
 <a id="verification"></a>
 

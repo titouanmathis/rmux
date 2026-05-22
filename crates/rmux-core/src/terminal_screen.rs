@@ -7,6 +7,7 @@ use rmux_proto::TerminalSize;
 
 use crate::screen::Screen;
 use crate::terminal::TerminalParser;
+use crate::terminal_passthrough::TerminalPassthrough;
 use crate::utf8::Utf8Config;
 
 /// Live terminal screen fed by rmux-core's private parser boundary.
@@ -55,10 +56,25 @@ impl TerminalScreen {
         self.parser.feed(bytes);
     }
 
+    /// Returns and drains terminal replies generated while parsing PTY output.
+    pub fn take_replies(&mut self) -> Vec<u8> {
+        self.parser.take_replies()
+    }
+
     /// Returns any bytes still buffered inside an incomplete parser state.
     #[must_use]
     pub fn pending_bytes(&self) -> Vec<u8> {
         self.parser.pending_bytes()
+    }
+
+    /// Returns and drains passthrough events generated while parsing PTY output.
+    pub fn take_terminal_passthrough(&mut self) -> Vec<TerminalPassthrough> {
+        self.parser.take_terminal_passthrough()
+    }
+
+    /// Returns and drains passthrough events dropped by parser safety limits.
+    pub fn take_terminal_passthrough_dropped_count(&mut self) -> u64 {
+        self.parser.take_terminal_passthrough_dropped_count()
     }
 
     /// Replaces the hidden parser with a fresh ground-state instance while

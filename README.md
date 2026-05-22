@@ -32,7 +32,7 @@ English · [Français](README.fr.md) · [简体中文](README.zh-CN.md) · [日�
 
 RMUX exists because I believe the tmux use case has only been partially explored. My own starting point was simple: I wanted to run long-lived agents over SSH without losing their terminals, while still being able to inspect, script, and orchestrate everything around them.
 
-So I rebuilt that idea from scratch in Rust: a blazing-fast, tmux-compatible multiplexer with a typed SDK, persistent sessions, structured snapshots, and native local transports on Linux, macOS, and Windows, including Windows Named Pipes. No WSL required.
+So I rebuilt that idea from scratch in Rust: a blazing-fast, tmux-compatible multiplexer with a typed SDK, persistent sessions, structured snapshots, and native local transports on Linux, macOS, and Windows, including Windows Named Pipes.
 
 RMUX is usable by agents, headless CLI workflows, and humans alike: you can give terminal apps detachable execution, reconnect later, inspect their state, drive them from code, or simply use it for normal tmux-style terminal work.
 
@@ -90,6 +90,8 @@ cargo add ratatui-rmux
 The full RMUX documentation is available at [rmux.io/docs](https://rmux.io/docs/).
 
 It includes [installation guides](https://rmux.io/docs/get-started/), [CLI references](https://rmux.io/docs/cli/), [SDK examples](https://rmux.io/docs/examples/), [terminal automation examples](https://rmux.io/docs/examples/#/terminal-playwright), and [API documentation](https://rmux.io/docs/api/).
+
+For an ergonomic, human-oriented profile that keeps native terminal selection intuitive while adding easier split bindings and clipboard integration, see [docs/human-friendly-config.md](docs/human-friendly-config.md).
 
 ## CLI Quickstart
 
@@ -218,6 +220,25 @@ On Windows, RMUX reads `.rmux.conf` as well, from the following locations:
 2. `%USERPROFILE%\.rmux.conf`
 3. `%APPDATA%\rmux\rmux.conf`
 4. `%RMUX_CONFIG_FILE%`
+
+### `tmux.conf` migration fallback
+
+When RMUX starts with the default config search and no RMUX config file is
+loaded, it can import a filtered `tmux.conf` as a migration fallback. Explicit
+config loading with `-f` does not use this fallback.
+
+Fallback paths:
+
+- Linux and macOS: `/etc/tmux.conf`, `~/.tmux.conf`, `$XDG_CONFIG_HOME/tmux/tmux.conf`, `~/.config/tmux/tmux.conf`
+- Windows: `%XDG_CONFIG_HOME%\tmux\tmux.conf`, `%USERPROFILE%\.tmux.conf`, `%APPDATA%\tmux\tmux.conf`
+
+The import is intentionally narrow: RMUX keeps supported static options and
+key unbindings, but skips tmux key bindings, environment or terminal capability
+mutations, plugin user options and hooks, shell commands, command blocks,
+conditionals, format jobs such as `#(cmd)`, recursive `source-file` entries,
+and unsupported options instead of executing them. Set
+`RMUX_DISABLE_TMUX_FALLBACK=1` to disable it entirely. Fallback files are read
+best-effort: non-regular files and files larger than 1 MiB are ignored.
 
 ## Verification
 

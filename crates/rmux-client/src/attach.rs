@@ -124,16 +124,15 @@ where
     let raw_terminal = RawTerminal::from_fd(terminal).map_err(ClientError::from)?;
     let _ = raw_terminal.flush_pending_input();
     let screen_tracker = AttachScreenTracker::default();
-    let result = drive_attach_with_terminal_state(
+    let attach_state = AttachTerminalState {
         stream,
         initial_bytes,
         terminal,
-        &raw_terminal,
-        &screen_tracker,
-        input,
-        output,
+        raw_terminal: &raw_terminal,
+        screen_tracker: &screen_tracker,
         resize_geometry_enabled,
-    );
+    };
+    let result = drive_attach_with_terminal_state(attach_state, input, output);
     if result.is_err() && !screen_tracker.was_stopped() {
         let _ = raw_terminal.restore_attach_terminal_state();
     }
@@ -142,15 +141,28 @@ where
     result
 }
 
-fn drive_attach_with_terminal_state<Terminal, Input, Output>(
+struct AttachTerminalState<'a, Terminal> {
     stream: UnixStream,
     initial_bytes: Vec<u8>,
-    terminal: &Terminal,
-    raw_terminal: &RawTerminal,
-    screen_tracker: &AttachScreenTracker,
+    terminal: &'a Terminal,
+    raw_terminal: &'a RawTerminal,
+    screen_tracker: &'a AttachScreenTracker,
+    resize_geometry_enabled: bool,
+}
+
+struct AttachStreamState<'a> {
+    stream: UnixStream,
+    initial_bytes: Vec<u8>,
+    raw_terminal: Option<&'a RawTerminal>,
+    screen_tracker: AttachScreenTracker,
+    resize_events: mpsc::Receiver<TerminalGeometry>,
+    resize_geometry_enabled: bool,
+}
+
+fn drive_attach_with_terminal_state<Terminal, Input, Output>(
+    state: AttachTerminalState<'_, Terminal>,
     input: Input,
     output: Output,
-    resize_geometry_enabled: bool,
 ) -> std::result::Result<(), ClientError>
 where
     Terminal: AsFd,
@@ -161,8 +173,9 @@ where
     // which keeps termios restoration as the last drop on every return path.
     let _signal_mask = SignalMaskGuard::block_winch().map_err(ClientError::from)?;
     let (resize_tx, resize_rx) = mpsc::channel();
-    let initial_geometry = terminal_geometry_from_fd(terminal).map_err(ClientError::from)?;
-    let terminal_fd = terminal
+    let initial_geometry = terminal_geometry_from_fd(state.terminal).map_err(ClientError::from)?;
+    let terminal_fd = state
+        .terminal
         .as_fd()
         .try_clone_to_owned()
         .map_err(AttachError::from)?;
@@ -176,16 +189,15 @@ where
     }
 
     let resize_watcher = ResizeWatcher::spawn(terminal_fd, resize_tx)?;
-    let attach_result = drive_attach_stream_with_locking(
-        stream,
-        initial_bytes,
-        raw_terminal,
-        screen_tracker,
-        input,
-        output,
-        resize_rx,
-        resize_geometry_enabled,
-    );
+    let stream_state = AttachStreamState {
+        stream: state.stream,
+        initial_bytes: state.initial_bytes,
+        raw_terminal: Some(state.raw_terminal),
+        screen_tracker: state.screen_tracker.clone(),
+        resize_events: resize_rx,
+        resize_geometry_enabled: state.resize_geometry_enabled,
+    };
+    let attach_result = drive_attach_stream_inner(stream_state, input, output);
     drop(resize_watcher);
     attach_result
 }
@@ -202,16 +214,73 @@ where
     Output: Write + Send + 'static,
 {
     let resize_events = geometry_resize_events_from_size_events(resize_events);
-    drive_attach_stream_inner(
+    let stream_state = AttachStreamState {
         stream,
-        Vec::new(),
-        None,
-        AttachScreenTracker::default(),
-        input,
-        output,
+        initial_bytes: Vec::new(),
+        raw_terminal: None,
+        screen_tracker: AttachScreenTracker::default(),
         resize_events,
-        false,
-    )
+        resize_geometry_enabled: false,
+    };
+    drive_attach_stream_inner(stream_state, input, output)
+}
+
+fn drive_attach_stream_inner<Input, Output>(
+    state: AttachStreamState<'_>,
+    input: Input,
+    output: Output,
+) -> std::result::Result<(), ClientError>
+where
+    Input: Read + AsFd + Send + 'static,
+    Output: Write + Send + 'static,
+{
+    let control = state.stream.try_clone().map_err(ClientError::Io)?;
+    let mut lock_stream = state.stream.try_clone().map_err(ClientError::Io)?;
+    let input_stream = state.stream.try_clone().map_err(ClientError::Io)?;
+    let closed = Arc::new(AtomicBool::new(false));
+    let input_closed = Arc::clone(&closed);
+    let output_closed = Arc::clone(&closed);
+    let locked = Arc::new(AtomicBool::new(false));
+    let input_locked = Arc::clone(&locked);
+    let output_locked = Arc::clone(&locked);
+    let (action_tx, action_rx) = mpsc::channel();
+
+    let input_thread = thread::spawn(move || {
+        input_loop(
+            input_stream,
+            input,
+            state.resize_events,
+            state.resize_geometry_enabled,
+            input_closed,
+            input_locked,
+        )
+    });
+    let output_screen_tracker = state.screen_tracker.clone();
+    let output_thread = thread::spawn(move || {
+        output_loop(
+            state.stream,
+            state.initial_bytes,
+            output,
+            output_closed,
+            output_locked,
+            output_screen_tracker,
+            action_tx,
+        )
+    });
+
+    let output_result = wait_for_output_thread(
+        output_thread,
+        state.raw_terminal,
+        &mut lock_stream,
+        &locked,
+        action_rx,
+    )?;
+    closed.store(true, Ordering::SeqCst);
+    let _ = control.shutdown(Shutdown::Both);
+    let input_result = join_attach_thread(input_thread)?;
+
+    output_result?;
+    input_result
 }
 
 fn geometry_resize_events_from_size_events(
@@ -226,95 +295,6 @@ fn geometry_resize_events_from_size_events(
         }
     });
     geometry_rx
-}
-
-fn drive_attach_stream_with_locking<Input, Output>(
-    stream: UnixStream,
-    initial_bytes: Vec<u8>,
-    raw_terminal: &RawTerminal,
-    screen_tracker: &AttachScreenTracker,
-    input: Input,
-    output: Output,
-    resize_events: mpsc::Receiver<TerminalGeometry>,
-    resize_geometry_enabled: bool,
-) -> std::result::Result<(), ClientError>
-where
-    Input: Read + AsFd + Send + 'static,
-    Output: Write + Send + 'static,
-{
-    drive_attach_stream_inner(
-        stream,
-        initial_bytes,
-        Some(raw_terminal),
-        screen_tracker.clone(),
-        input,
-        output,
-        resize_events,
-        resize_geometry_enabled,
-    )
-}
-
-fn drive_attach_stream_inner<Input, Output>(
-    stream: UnixStream,
-    initial_bytes: Vec<u8>,
-    raw_terminal: Option<&RawTerminal>,
-    screen_tracker: AttachScreenTracker,
-    input: Input,
-    output: Output,
-    resize_events: mpsc::Receiver<TerminalGeometry>,
-    resize_geometry_enabled: bool,
-) -> std::result::Result<(), ClientError>
-where
-    Input: Read + AsFd + Send + 'static,
-    Output: Write + Send + 'static,
-{
-    let control = stream.try_clone().map_err(ClientError::Io)?;
-    let mut lock_stream = stream.try_clone().map_err(ClientError::Io)?;
-    let input_stream = stream.try_clone().map_err(ClientError::Io)?;
-    let closed = Arc::new(AtomicBool::new(false));
-    let input_closed = Arc::clone(&closed);
-    let output_closed = Arc::clone(&closed);
-    let locked = Arc::new(AtomicBool::new(false));
-    let input_locked = Arc::clone(&locked);
-    let output_locked = Arc::clone(&locked);
-    let (action_tx, action_rx) = mpsc::channel();
-
-    let input_thread = thread::spawn(move || {
-        input_loop(
-            input_stream,
-            input,
-            resize_events,
-            resize_geometry_enabled,
-            input_closed,
-            input_locked,
-        )
-    });
-    let output_screen_tracker = screen_tracker.clone();
-    let output_thread = thread::spawn(move || {
-        output_loop(
-            stream,
-            initial_bytes,
-            output,
-            output_closed,
-            output_locked,
-            output_screen_tracker,
-            action_tx,
-        )
-    });
-
-    let output_result = wait_for_output_thread(
-        output_thread,
-        raw_terminal,
-        &mut lock_stream,
-        &locked,
-        action_rx,
-    )?;
-    closed.store(true, Ordering::SeqCst);
-    let _ = control.shutdown(Shutdown::Both);
-    let input_result = join_attach_thread(input_thread)?;
-
-    output_result?;
-    input_result
 }
 
 fn input_loop<Input>(

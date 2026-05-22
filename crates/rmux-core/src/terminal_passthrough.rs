@@ -1,10 +1,12 @@
+use std::sync::Arc;
+
 /// Opaque terminal command that must be forwarded to a capable outer terminal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalPassthrough {
     kind: TerminalPassthroughKind,
     cursor_x: u32,
     cursor_y: u32,
-    payload: Vec<u8>,
+    payload: Arc<[u8]>,
 }
 
 /// Supported terminal passthrough protocol families.
@@ -22,7 +24,7 @@ impl TerminalPassthrough {
             kind: TerminalPassthroughKind::KittyGraphics,
             cursor_x,
             cursor_y,
-            payload: payload.into(),
+            payload: Arc::from(payload.into()),
         }
     }
 
@@ -62,42 +64,5 @@ impl TerminalPassthrough {
                 sequence
             }
         }
-    }
-
-    /// Returns whether the passthrough payload already carries placement
-    /// coordinates that the outer terminal should interpret directly.
-    #[must_use]
-    pub fn has_explicit_placement(&self) -> bool {
-        match self.kind {
-            TerminalPassthroughKind::KittyGraphics => {
-                kitty_graphics_payload_has_explicit_placement(&self.payload)
-            }
-        }
-    }
-}
-
-fn kitty_graphics_payload_has_explicit_placement(payload: &[u8]) -> bool {
-    let header = payload
-        .split(|byte| *byte == b';')
-        .next()
-        .unwrap_or(payload);
-    header.split(|byte| *byte == b',').any(|field| {
-        let field = field.strip_prefix(b"G").unwrap_or(field);
-        field.starts_with(b"r=") || field.starts_with(b"c=")
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::TerminalPassthrough;
-
-    #[test]
-    fn kitty_graphics_detects_explicit_row_or_column_placement() {
-        assert!(
-            TerminalPassthrough::kitty_graphics(0, 0, b"Ga=p,r=10,c=20;AAAA")
-                .has_explicit_placement()
-        );
-        assert!(TerminalPassthrough::kitty_graphics(0, 0, b"Gr=10;AAAA").has_explicit_placement());
-        assert!(!TerminalPassthrough::kitty_graphics(0, 0, b"Gf=100;AAAA").has_explicit_placement());
     }
 }

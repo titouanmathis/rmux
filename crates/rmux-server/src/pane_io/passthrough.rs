@@ -13,9 +13,10 @@ pub(super) fn render_passthroughs(
     let mut frame = Vec::new();
     frame.extend_from_slice(b"\x1b[s");
     for passthrough in passthroughs {
-        if !passthrough.has_explicit_placement() {
-            append_cursor_position(&mut frame, target.active_pane_geometry, passthrough);
-        }
+        // Kitty `c=` and `r=` describe image dimensions, not absolute terminal
+        // coordinates, so every live passthrough is anchored at the pane-local
+        // cursor captured when the application emitted it.
+        append_cursor_position(&mut frame, target.active_pane_geometry, passthrough);
         frame.extend_from_slice(&passthrough.render_sequence());
     }
     frame.extend_from_slice(b"\x1b[u");
@@ -91,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn render_passthroughs_keeps_explicit_kitty_placement_in_payload() {
+    fn render_passthroughs_anchors_kitty_dimension_payloads_at_pane_cursor() {
         let pty = PtyPair::open().expect("open pty pair");
         let pane_output = pane_output_channel();
         let target = OpenAttachTarget {
@@ -118,7 +119,10 @@ mod tests {
                 b"Ga=p,r=10,c=20;AAAA".to_vec(),
             )],
         );
-        assert_eq!(frame, b"\x1b[s\x1b_Ga=p,r=10,c=20;AAAA\x1b\\\x1b[u");
+        assert_eq!(
+            frame,
+            b"\x1b[s\x1b[9;7H\x1b_Ga=p,r=10,c=20;AAAA\x1b\\\x1b[u"
+        );
     }
 
     #[test]

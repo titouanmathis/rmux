@@ -46,6 +46,13 @@ impl OutputEvent {
     pub fn into_parts(self) -> (Vec<u8>, Vec<TerminalPassthrough>) {
         (self.bytes, self.passthroughs)
     }
+
+    /// Returns a copy of this event carrying terminal passthrough side effects.
+    #[must_use]
+    pub fn with_passthroughs(mut self, passthroughs: Vec<TerminalPassthrough>) -> Self {
+        self.passthroughs = passthroughs;
+        self
+    }
 }
 
 /// Bounded recent live bytes retained alongside an output ring.
@@ -170,19 +177,10 @@ impl OutputRing {
 
     /// Appends one output event, rotates the ring, and updates recent live bytes.
     pub fn push(&mut self, bytes: Vec<u8>) -> OutputEvent {
-        self.push_with_passthroughs(bytes, Vec::new())
-    }
-
-    /// Appends one output event with terminal passthrough side effects.
-    pub fn push_with_passthroughs(
-        &mut self,
-        bytes: Vec<u8>,
-        passthroughs: Vec<TerminalPassthrough>,
-    ) -> OutputEvent {
         let event = OutputEvent {
             sequence: self.next_sequence,
             bytes,
-            passthroughs,
+            passthroughs: Vec::new(),
         };
         self.next_sequence = self
             .next_sequence

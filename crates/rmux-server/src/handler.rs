@@ -17,6 +17,8 @@ mod alert_support;
 pub(crate) mod attach_support;
 #[path = "handler_buffer.rs"]
 mod buffer_support;
+#[path = "handler_client_environment.rs"]
+mod client_environment_support;
 #[path = "handler_client_runtime.rs"]
 mod client_runtime_support;
 #[path = "handler_client.rs"]
@@ -67,6 +69,7 @@ use crate::pane_terminals::HandlerState;
 use crate::server_access::{current_owner_uid, AccessMode, ServerAccessStore};
 use crate::wait_for::WaitForStore;
 use attach_support::{ActiveAttachState, ClientFlags};
+pub(in crate::handler) use client_environment_support::client_spawn_environment;
 pub(in crate::handler) use client_runtime_support::{
     attached_client_matches_target, client_environment_snapshot, clipboard_query_sequence,
     command_output_from_lines, effective_client_terminal_context, format_client_uid,

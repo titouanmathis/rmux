@@ -622,7 +622,7 @@ async fn move_pane_routes_through_join_semantics() {
                     start_directory: None,
                     command: None,
                     socket_path: Path::new("/tmp/rmux-test.sock"),
-                    base_environment: None,
+                    spawn_environment: None,
                     environment_overrides: None,
                     pane_alert_callback: None,
                     pane_exit_callback: None,

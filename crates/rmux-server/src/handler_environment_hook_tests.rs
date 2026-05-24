@@ -881,6 +881,20 @@ async fn new_session_ext_client_environment_seeds_initial_pane() {
     let handler = RequestHandler::new();
     let session = session_name("client-env");
 
+    assert!(matches!(
+        handler
+            .handle(Request::SetEnvironment(SetEnvironmentRequest {
+                scope: ScopeSelector::Global,
+                name: "RMUX_GLOBAL_ENV_SENTINEL".to_owned(),
+                value: "from-server".to_owned(),
+                mode: None,
+                hidden: false,
+                format: false,
+            }))
+            .await,
+        Response::SetEnvironment(_)
+    ));
+
     let response = handler
         .handle(Request::NewSessionExt(NewSessionExtRequest {
             session_name: Some(session.clone()),
@@ -900,6 +914,8 @@ async fn new_session_ext_client_environment_seeds_initial_pane() {
             process_command: None,
             client_environment: Some(vec![
                 "PATH=/tmp/rmux-client-bin:/usr/bin".to_owned(),
+                "SSH_AUTH_SOCK=/tmp/rmux-client-agent.sock".to_owned(),
+                "RMUX_GLOBAL_ENV_SENTINEL=from-client".to_owned(),
                 "RMUX_CLIENT_ENV_SENTINEL=from-client".to_owned(),
             ]),
         }))
@@ -916,6 +932,14 @@ async fn new_session_ext_client_environment_seeds_initial_pane() {
         Some("/tmp/rmux-client-bin:/usr/bin")
     );
     assert_eq!(
+        pane_zero.environment_value("SSH_AUTH_SOCK"),
+        Some("/tmp/rmux-client-agent.sock")
+    );
+    assert_eq!(
+        pane_zero.environment_value("RMUX_GLOBAL_ENV_SENTINEL"),
+        Some("from-server")
+    );
+    assert_ne!(
         pane_zero.environment_value("RMUX_CLIENT_ENV_SENTINEL"),
         Some("from-client")
     );

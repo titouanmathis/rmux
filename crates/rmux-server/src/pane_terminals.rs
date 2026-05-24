@@ -64,7 +64,7 @@ pub(crate) struct WindowSpawnOptions<'a> {
     pub(crate) start_directory: Option<&'a Path>,
     pub(crate) command: Option<&'a ProcessCommand>,
     pub(crate) socket_path: &'a Path,
-    pub(crate) base_environment: Option<&'a HashMap<String, String>>,
+    pub(crate) spawn_environment: Option<&'a HashMap<String, String>>,
     pub(crate) environment_overrides: Option<&'a [String]>,
     pub(crate) pane_alert_callback: Option<PaneAlertCallback>,
     pub(crate) pane_exit_callback: Option<PaneExitCallback>,
@@ -72,7 +72,7 @@ pub(crate) struct WindowSpawnOptions<'a> {
 
 pub(crate) struct InitialPaneSpawnOptions<'a> {
     pub(crate) socket_path: &'a Path,
-    pub(crate) base_environment: Option<&'a HashMap<String, String>>,
+    pub(crate) spawn_environment: Option<&'a HashMap<String, String>>,
     pub(crate) environment_overrides: Option<&'a [String]>,
     pub(crate) command: Option<&'a ProcessCommand>,
     pub(crate) pane_alert_callback: Option<PaneAlertCallback>,
@@ -418,7 +418,7 @@ mod tests {
                 &alpha,
                 InitialPaneSpawnOptions {
                     socket_path: std::path::Path::new("/tmp/rmux-test.sock"),
-                    base_environment: None,
+                    spawn_environment: None,
                     environment_overrides: None,
                     command: None,
                     pane_alert_callback: None,

@@ -24,12 +24,6 @@ pub(crate) struct TerminalProfile {
     environment: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BaseEnvironmentMode {
-    Fallback,
-    OverrideStore,
-}
-
 impl TerminalProfile {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_session(
@@ -38,20 +32,19 @@ impl TerminalProfile {
         session_name: &SessionName,
         session_id: u32,
         socket_path: &Path,
-        base_environment: Option<&HashMap<String, String>>,
+        spawn_environment: Option<&HashMap<String, String>>,
         include_terminal_defaults: bool,
         overrides: Option<&[String]>,
         pane_id: Option<PaneId>,
         requested_cwd: Option<&Path>,
     ) -> Result<Self, RmuxError> {
-        Self::for_session_with_base_environment_mode(
+        Self::for_session_with_spawn_environment(
             environment,
             options,
             session_name,
             session_id,
             socket_path,
-            base_environment,
-            BaseEnvironmentMode::Fallback,
+            spawn_environment,
             include_terminal_defaults,
             overrides,
             pane_id,
@@ -66,20 +59,19 @@ impl TerminalProfile {
         session_name: &SessionName,
         session_id: u32,
         socket_path: &Path,
-        base_environment: Option<&HashMap<String, String>>,
+        spawn_environment: Option<&HashMap<String, String>>,
         include_terminal_defaults: bool,
         overrides: Option<&[String]>,
         pane_id: Option<PaneId>,
         requested_cwd: Option<&Path>,
     ) -> Result<Self, RmuxError> {
-        Self::for_session_with_base_environment_mode(
+        Self::for_session_with_spawn_environment(
             environment,
             options,
             session_name,
             session_id,
             socket_path,
-            base_environment,
-            BaseEnvironmentMode::OverrideStore,
+            spawn_environment,
             include_terminal_defaults,
             overrides,
             pane_id,
@@ -88,28 +80,23 @@ impl TerminalProfile {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn for_session_with_base_environment_mode(
+    fn for_session_with_spawn_environment(
         environment: &EnvironmentStore,
         options: &OptionStore,
         session_name: &SessionName,
         session_id: u32,
         socket_path: &Path,
-        base_environment: Option<&HashMap<String, String>>,
-        base_environment_mode: BaseEnvironmentMode,
+        spawn_environment: Option<&HashMap<String, String>>,
         include_terminal_defaults: bool,
         overrides: Option<&[String]>,
         pane_id: Option<PaneId>,
         requested_cwd: Option<&Path>,
     ) -> Result<Self, RmuxError> {
-        let mut resolved = base_environment
-            .cloned()
-            .unwrap_or_else(base_process_environment);
+        let mut resolved = base_process_environment();
         environment.apply_to_process_environment(Some(session_name), &mut resolved);
-        if base_environment_mode == BaseEnvironmentMode::OverrideStore {
-            if let Some(base_environment) = base_environment {
-                for (name, value) in base_environment {
-                    set_environment_value(&mut resolved, name.clone(), value.clone());
-                }
+        if let Some(spawn_environment) = spawn_environment {
+            for (name, value) in spawn_environment {
+                set_environment_value(&mut resolved, name.clone(), value.clone());
             }
         }
 

@@ -57,7 +57,7 @@ async fn insert_window(handler: &RequestHandler, session_name: &SessionName, win
                 start_directory: None,
                 command: None,
                 socket_path: Path::new("/tmp/rmux-test.sock"),
-                base_environment: None,
+                spawn_environment: None,
                 environment_overrides: None,
                 pane_alert_callback: None,
                 pane_exit_callback: None,

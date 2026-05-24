@@ -116,11 +116,11 @@ fn terminal_profile_sets_rmux_term_shell_and_pane_context() {
 }
 
 #[test]
-fn terminal_profile_uses_client_environment_as_spawn_base() {
+fn terminal_profile_applies_spawn_environment_before_explicit_overrides() {
     let environment = EnvironmentStore::new();
     let mut options = OptionStore::new();
     let session_name = SessionName::new("alpha").expect("valid session name");
-    let base_environment = HashMap::from([
+    let spawn_environment = HashMap::from([
         ("PATH".to_owned(), "/client/bin:/usr/bin".to_owned()),
         ("RMUX_CLIENT_ONLY".to_owned(), "present".to_owned()),
     ]);
@@ -140,7 +140,7 @@ fn terminal_profile_uses_client_environment_as_spawn_base() {
         &session_name,
         7,
         temp_socket_path().as_path(),
-        Some(&base_environment),
+        Some(&spawn_environment),
         true,
         Some(&["RMUX_CLIENT_ONLY=override".to_owned()]),
         None,

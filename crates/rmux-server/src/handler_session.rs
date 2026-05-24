@@ -27,9 +27,10 @@ use client_environment::new_session_client_environment;
 use list::{sort_list_sessions, ListSessionSnapshot};
 
 use super::{
-    command_output_from_lines, option_value_u32, parse_session_sort_order, prepare_lifecycle_event,
-    resolve_existing_session_target, resolve_session_lookup, update_environment_from_client,
-    PendingShutdownReason, RequestHandler, SessionLookup, SessionSortOrder, DEFAULT_SESSION_SIZE,
+    client_spawn_environment, command_output_from_lines, option_value_u32,
+    parse_session_sort_order, prepare_lifecycle_event, resolve_existing_session_target,
+    resolve_session_lookup, update_environment_from_client, PendingShutdownReason, RequestHandler,
+    SessionLookup, SessionSortOrder, DEFAULT_SESSION_SIZE,
 };
 
 impl RequestHandler {
@@ -81,6 +82,7 @@ impl RequestHandler {
             Ok(environment) => environment,
             Err(error) => return Response::Error(ErrorResponse { error }),
         };
+        let spawn_environment = client_spawn_environment(client_environment.as_ref());
 
         if request.attach_if_exists && request.group_target.is_none() {
             if let Some(existing) = request.session_name.as_ref() {
@@ -225,7 +227,7 @@ impl RequestHandler {
                     &session_name,
                     InitialPaneSpawnOptions {
                         socket_path: &socket_path,
-                        base_environment: client_environment.as_ref(),
+                        spawn_environment: spawn_environment.as_ref(),
                         environment_overrides: environment_overrides.as_deref(),
                         command: process_command.as_ref(),
                         pane_alert_callback: Some(self.pane_alert_callback()),

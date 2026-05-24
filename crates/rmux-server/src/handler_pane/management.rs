@@ -4,7 +4,7 @@ use rmux_proto::{
 };
 
 use super::super::{
-    client_environment_snapshot, prepare_lifecycle_event,
+    client_environment_snapshot, client_spawn_environment, prepare_lifecycle_event,
     scripting_support::format_context_for_target, RequestHandler,
 };
 use crate::format_runtime::render_runtime_template;
@@ -338,6 +338,7 @@ impl RequestHandler {
             return Response::Error(ErrorResponse { error });
         }
         let client_environment = client_environment_snapshot(requester_pid);
+        let spawn_environment = client_spawn_environment(client_environment.as_ref());
         let response = {
             let mut state = self.state.lock().await;
             match state.split_window(
@@ -345,7 +346,7 @@ impl RequestHandler {
                 direction,
                 before,
                 &socket_path,
-                client_environment.as_ref(),
+                spawn_environment.as_ref(),
                 environment_overrides.as_deref(),
                 process_command.as_ref(),
                 start_directory.as_deref(),
@@ -579,12 +580,13 @@ impl RequestHandler {
         let session_name = request.target.session_name().clone();
         let socket_path = self.socket_path();
         let client_environment = client_environment_snapshot(requester_pid);
+        let spawn_environment = client_spawn_environment(client_environment.as_ref());
         let response = {
             let mut state = self.state.lock().await;
             match state.respawn_pane(
                 request,
                 &socket_path,
-                client_environment.as_ref(),
+                spawn_environment.as_ref(),
                 Some(self.pane_alert_callback()),
                 Some(self.pane_exit_callback()),
                 |state, replaced| {

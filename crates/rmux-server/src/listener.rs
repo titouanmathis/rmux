@@ -136,6 +136,8 @@ async fn serve_connection(
                         continue;
                     }
                 };
+                let detached_request_guard = request_counts_as_detached_activity(&request)
+                    .then(|| handler.begin_detached_request());
 
                 let cancel_on_peer_disconnect = request_cancels_on_peer_disconnect(&request);
                 debug!("dispatching {}", request.command_name());
@@ -154,9 +156,6 @@ async fn serve_connection(
                     }
                 };
                 conn.write_response(&outcome.response).await?;
-                if handler.request_shutdown_if_pending() {
-                    return Ok(());
-                }
 
                 if let Some(attach) = outcome.attach {
                     let Response::AttachSession(response) = &outcome.response else {
@@ -183,6 +182,7 @@ async fn serve_connection(
                             },
                         )
                         .await;
+                    drop(detached_request_guard);
                     handler.emit_client_attached(requester.pid, session_name).await;
                     let (stream, buffered_bytes) = conn.into_raw_parts();
                     if !buffered_bytes.is_empty() {
@@ -224,6 +224,7 @@ async fn serve_connection(
                             },
                         )
                         .await;
+                    drop(detached_request_guard);
                     let (stream, buffered_bytes) = conn.into_raw_parts();
                     let result = control::forward_control(
                         stream,
@@ -240,6 +241,11 @@ async fn serve_connection(
                     .await;
                     handler.finish_control(requester.pid, control_id).await;
                     return result;
+                }
+
+                drop(detached_request_guard);
+                if handler.request_shutdown_if_pending() {
+                    return Ok(());
                 }
             }
             result = shutdown.changed() => {
@@ -260,6 +266,13 @@ fn request_cancels_on_peer_disconnect(request: &Request) -> bool {
     ) || matches!(
         request,
         Request::SdkWaitForOutput(_) | Request::SdkWaitForOutputRef(_)
+    )
+}
+
+fn request_counts_as_detached_activity(request: &Request) -> bool {
+    !matches!(
+        request,
+        Request::Handshake(_) | Request::DaemonStatus(_) | Request::ShutdownIfIdle(_)
     )
 }
 

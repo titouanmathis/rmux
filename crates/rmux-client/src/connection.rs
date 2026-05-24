@@ -15,7 +15,7 @@ use crate::ClientError;
 use rmux_ipc::{connect_blocking, BlockingLocalStream, LocalEndpoint};
 use rmux_proto::{
     encode_frame, AttachSessionResponse, ControlMode, ControlModeResponse, FrameDecoder,
-    HandshakeRequest, Request, Response,
+    HandshakeRequest, Request, Response, RmuxError,
 };
 
 /// Read buffer size for blocking socket reads.
@@ -99,6 +99,7 @@ pub fn connect(socket_path: &Path) -> Result<Connection, ClientError> {
 pub struct Connection {
     stream: BlockingLocalStream,
     decoder: FrameDecoder,
+    handshake_capabilities: Option<Vec<String>>,
 }
 
 /// The explicit result of requesting an attach-stream upgrade.
@@ -183,6 +184,7 @@ impl Connection {
         Ok(Self {
             stream,
             decoder: FrameDecoder::new(),
+            handshake_capabilities: None,
         })
     }
 
@@ -203,13 +205,31 @@ impl Connection {
     /// supporting the capability, leaving the connection usable for legacy
     /// requests.
     pub fn supports_capability(&mut self, capability: &str) -> Result<bool, ClientError> {
+        if let Some(capabilities) = &self.handshake_capabilities {
+            return Ok(capabilities.iter().any(|supported| supported == capability));
+        }
+
         match self.roundtrip(&Request::Handshake(HandshakeRequest::current()))? {
-            Response::Handshake(response) => Ok(response
-                .capabilities
-                .iter()
-                .any(|supported| supported == capability)),
-            Response::Error(_) => Ok(false),
-            _ => Ok(false),
+            Response::Handshake(response) => {
+                self.handshake_capabilities = Some(response.capabilities);
+                Ok(self
+                    .handshake_capabilities
+                    .as_ref()
+                    .expect("handshake capabilities were just cached")
+                    .iter()
+                    .any(|supported| supported == capability))
+            }
+            Response::Error(error) => {
+                if matches!(&error.error, RmuxError::UnsupportedWireVersion { .. }) {
+                    return Err(ClientError::Protocol(error.error));
+                }
+                self.handshake_capabilities = Some(Vec::new());
+                Ok(false)
+            }
+            _ => {
+                self.handshake_capabilities = Some(Vec::new());
+                Ok(false)
+            }
         }
     }
 

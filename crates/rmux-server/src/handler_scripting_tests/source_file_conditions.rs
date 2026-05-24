@@ -189,8 +189,8 @@ async fn source_file_routes_window_show_commands_and_global_show_scope_compatibi
             caller_cwd: Some(root),
             stdin: Some(
                 "set-option -s message-limit 77\n\
-set-window-option -g pane-border-style fg=colour3\n\
-set-option -g copy-mode-selection-style bg=cyan,fg=black\n\
+set -gw pane-border-style fg=colour3\n\
+set -gw copy-mode-selection-style bg=cyan,fg=black\n\
 	show-options -gqsv -t alpha message-limit\n\
 show-window-options -g -t alpha -v pane-border-style\n\
 show-window-options -g -v copy-mode-selection-style\n"

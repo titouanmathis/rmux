@@ -3,6 +3,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{ProcessCommand, SessionName, TerminalSize};
 
+use super::compat::{compat_next_element, required_next};
+
 /// Request payload for `new-session`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewSessionRequest {
@@ -217,34 +219,6 @@ impl<'de> Visitor<'de> for NewSessionExtRequestVisitor {
             client_environment: client_environment.unwrap_or_default(),
         })
     }
-}
-
-fn required_next<'de, A, T, V>(seq: &mut A, index: usize, visitor: &V) -> Result<T, A::Error>
-where
-    A: SeqAccess<'de>,
-    T: Deserialize<'de>,
-    V: Visitor<'de>,
-{
-    seq.next_element()?
-        .ok_or_else(|| de::Error::invalid_length(index, visitor))
-}
-
-fn compat_next_element<'de, A, T>(seq: &mut A) -> Result<T, A::Error>
-where
-    A: SeqAccess<'de>,
-    T: Deserialize<'de> + Default,
-{
-    match seq.next_element::<T>() {
-        Ok(Some(value)) => Ok(value),
-        Ok(None) => Ok(T::default()),
-        Err(error) if is_truncated_compat_sequence(&error) => Ok(T::default()),
-        Err(error) => Err(error),
-    }
-}
-
-fn is_truncated_compat_sequence(error: &impl std::fmt::Display) -> bool {
-    let message = error.to_string();
-    message.contains("UnexpectedEof") || message.contains("unexpected end of file")
 }
 
 /// Request payload for `has-session`.

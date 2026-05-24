@@ -8,6 +8,9 @@ use crate::{
     SessionName, Target, WindowTarget,
 };
 
+#[path = "request/compat.rs"]
+mod compat;
+
 #[path = "request/show.rs"]
 mod show;
 pub use show::ShowHooksRequest;

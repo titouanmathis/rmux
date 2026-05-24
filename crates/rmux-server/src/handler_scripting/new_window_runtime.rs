@@ -7,6 +7,7 @@ use rmux_proto::{
 
 use super::queue::{queue_action_from_response, QueueCommandAction};
 use super::queue_parse::ParsedNewWindowCommand;
+use crate::handler::client_environment_snapshot;
 use crate::handler::RequestHandler;
 use crate::hook_runtime::{capture_inline_hooks, PendingInlineHookFormat};
 use crate::pane_terminals::{NewWindowOptions, WindowSpawnOptions};
@@ -45,6 +46,7 @@ impl RequestHandler {
 
         let socket_path = self.socket_path();
         let process_command = rmux_proto::ProcessCommand::from_legacy_command(command.as_deref());
+        let client_environment = client_environment_snapshot(requester_pid);
         let (response, inline_hooks) = capture_inline_hooks(async {
             let response = {
                 let mut state = self.state.lock().await;
@@ -59,6 +61,7 @@ impl RequestHandler {
                             start_directory: start_directory.as_deref(),
                             command: process_command.as_ref(),
                             socket_path: &socket_path,
+                            base_environment: client_environment.as_ref(),
                             environment_overrides: environment.as_deref(),
                             pane_alert_callback: Some(self.pane_alert_callback()),
                             pane_exit_callback: Some(self.pane_exit_callback()),
@@ -96,10 +99,20 @@ impl RequestHandler {
         })
         .await;
 
+        let inline_hook_names = inline_hooks
+            .iter()
+            .map(|pending| pending.hook)
+            .collect::<Vec<_>>();
         self.run_inline_hooks(requester_pid, inline_hooks, None)
             .await;
-        self.run_request_hooks(requester_pid, &request_for_hooks, &response, None)
-            .await;
+        self.run_request_hooks(
+            requester_pid,
+            &request_for_hooks,
+            &response,
+            None,
+            &inline_hook_names,
+        )
+        .await;
 
         queue_action_from_response(response)
     }

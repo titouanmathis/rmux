@@ -330,6 +330,10 @@ impl RequestHandler {
                     request,
                 ))
                 .await;
+                let inline_hook_names = inline_hooks
+                    .iter()
+                    .map(|pending| pending.hook)
+                    .collect::<Vec<_>>();
                 self.run_inline_hooks(requester_pid, inline_hooks, Some(&command_for_hooks))
                     .await;
                 self.run_request_hooks(
@@ -337,6 +341,7 @@ impl RequestHandler {
                     &request_for_hooks,
                     &outcome.response,
                     Some(&command_for_hooks),
+                    &inline_hook_names,
                 )
                 .await;
                 match mode {

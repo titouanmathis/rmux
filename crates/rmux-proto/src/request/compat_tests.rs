@@ -217,4 +217,5 @@ fn new_session_ext_request_deserializes_old_payloads_with_defaulted_fields() {
     assert_eq!(decoded.window_name.as_deref(), Some("main"));
     assert_eq!(decoded.command, Some(vec!["printf ready".to_owned()]));
     assert_eq!(decoded.process_command, None);
+    assert_eq!(decoded.client_environment, None);
 }

@@ -6,26 +6,30 @@ use rmux_core::{
 };
 use rmux_proto::request::NewSessionExtRequest;
 use rmux_proto::{
-    CommandOutput, ErrorResponse, HasSessionResponse, KillSessionResponse, ListSessionsResponse,
+    ErrorResponse, HasSessionResponse, KillSessionResponse, ListSessionsResponse,
     NewSessionResponse, OptionName, Response, RmuxError,
 };
 
 use crate::format_runtime::{render_runtime_template, RuntimeFormatContext};
+use crate::pane_terminals::InitialPaneSpawnOptions;
 use crate::terminal::validate_process_command;
 
+#[path = "handler_session/client_environment.rs"]
+mod client_environment;
 #[path = "handler_session/control_mode.rs"]
 mod control_mode;
 #[path = "handler_session/list.rs"]
 mod list;
+#[path = "handler_session/output.rs"]
+mod output;
 
+use client_environment::new_session_client_environment;
 use list::{sort_list_sessions, ListSessionSnapshot};
 
 use super::{
-    client_environment_snapshot, command_output_from_lines, option_value_u32,
-    parse_session_sort_order, prepare_lifecycle_event, resolve_existing_session_target,
-    resolve_session_lookup, scripting_support::format_context_for_target,
-    update_environment_from_client, PendingShutdownReason, RequestHandler, SessionLookup,
-    SessionSortOrder, DEFAULT_SESSION_SIZE,
+    command_output_from_lines, option_value_u32, parse_session_sort_order, prepare_lifecycle_event,
+    resolve_existing_session_target, resolve_session_lookup, update_environment_from_client,
+    PendingShutdownReason, RequestHandler, SessionLookup, SessionSortOrder, DEFAULT_SESSION_SIZE,
 };
 
 impl RequestHandler {
@@ -52,6 +56,7 @@ impl RequestHandler {
                 print_format: None,
                 command: None,
                 process_command: None,
+                client_environment: None,
             },
         )
         .await
@@ -69,6 +74,13 @@ impl RequestHandler {
                 error: RmuxError::Server("command or window name given with target".to_owned()),
             });
         }
+        let client_environment = match new_session_client_environment(
+            requester_pid,
+            request.client_environment.as_deref(),
+        ) {
+            Ok(environment) => environment,
+            Err(error) => return Response::Error(ErrorResponse { error }),
+        };
 
         if request.attach_if_exists && request.group_target.is_none() {
             if let Some(existing) = request.session_name.as_ref() {
@@ -78,12 +90,12 @@ impl RequestHandler {
                 };
                 if session_exists {
                     let session_name = existing.clone();
-                    if let Some(client_environment) = client_environment_snapshot(requester_pid) {
+                    if let Some(client_environment) = client_environment.as_ref() {
                         let mut state = self.state.lock().await;
                         update_environment_from_client(
                             &mut state,
                             &session_name,
-                            &client_environment,
+                            client_environment,
                         );
                     }
                     if !request.detached
@@ -119,7 +131,6 @@ impl RequestHandler {
         }
         let requested_name = request.session_name;
         let socket_path = self.socket_path();
-        let client_environment = client_environment_snapshot(requester_pid);
         let response = {
             let mut state = self.state.lock().await;
             let base_index =
@@ -212,11 +223,14 @@ impl RequestHandler {
             if needs_terminal {
                 match state.insert_initial_session_terminal(
                     &session_name,
-                    &socket_path,
-                    environment_overrides.as_deref(),
-                    process_command.as_ref(),
-                    Some(self.pane_alert_callback()),
-                    Some(self.pane_exit_callback()),
+                    InitialPaneSpawnOptions {
+                        socket_path: &socket_path,
+                        base_environment: client_environment.as_ref(),
+                        environment_overrides: environment_overrides.as_deref(),
+                        command: process_command.as_ref(),
+                        pane_alert_callback: Some(self.pane_alert_callback()),
+                        pane_exit_callback: Some(self.pane_exit_callback()),
+                    },
                 ) {
                     Ok(()) => {}
                     Err(error) => {
@@ -533,30 +547,6 @@ impl RequestHandler {
         Response::ListSessions(ListSessionsResponse {
             output: command_output_from_lines(&lines),
         })
-    }
-
-    async fn render_new_session_output(
-        &self,
-        session_name: &rmux_proto::SessionName,
-        template: Option<&str>,
-    ) -> Result<CommandOutput, RmuxError> {
-        const NEW_SESSION_TEMPLATE: &str = "#{session_name}:";
-
-        let attached_count = self.attached_count(session_name).await;
-        let state = self.state.lock().await;
-        let mut runtime = format_context_for_target(
-            &state,
-            &rmux_proto::Target::Session(session_name.clone()),
-            attached_count,
-        )?;
-        if attached_count == 0 {
-            runtime = runtime.with_unclipped_geometry();
-        }
-        let expanded =
-            render_runtime_template(template.unwrap_or(NEW_SESSION_TEMPLATE), &runtime, false);
-        Ok(CommandOutput::from_stdout(
-            format!("{expanded}\n").into_bytes(),
-        ))
     }
 
     pub(in crate::handler) async fn request_shutdown_if_server_empty(&self) -> bool {

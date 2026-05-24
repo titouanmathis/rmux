@@ -231,6 +231,7 @@ impl From<NewSessionSpec> for rmux_proto::NewSessionExtRequest {
             print_format: value.print_format,
             command,
             process_command,
+            client_environment: None,
         }
     }
 }

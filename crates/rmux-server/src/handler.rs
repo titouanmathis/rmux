@@ -656,6 +656,10 @@ mod set_mutation_tests;
 mod environment_hook_tests;
 
 #[cfg(test)]
+#[path = "handler_hook_dispatch_tests.rs"]
+mod hook_dispatch_tests;
+
+#[cfg(test)]
 #[path = "handler_zoom_tests.rs"]
 mod zoom_tests;
 
@@ -692,6 +696,10 @@ mod clock_mode_tests;
 mod control_notification_tests;
 
 #[cfg(test)]
+#[path = "handler_control_lifecycle_tests.rs"]
+mod control_lifecycle_tests;
+
+#[cfg(test)]
 #[path = "handler_scripting_tests.rs"]
 mod scripting_tests;
 
@@ -702,3 +710,11 @@ mod prompt_tests;
 #[cfg(test)]
 #[path = "handler_pane_command_tests.rs"]
 mod pane_command_tests;
+
+#[cfg(test)]
+#[path = "handler_pane_pipe_tests.rs"]
+mod pane_pipe_tests;
+
+#[cfg(test)]
+#[path = "handler_pane_exit_format_tests.rs"]
+mod pane_exit_format_tests;

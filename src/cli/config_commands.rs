@@ -98,8 +98,9 @@ pub(crate) fn run_show_options(
         Err(error) if quiet && quiet_option_failure(&error) => return Ok(0),
         Err(error) => return Err(error),
     };
+    let include_inherited = args.include_inherited;
     let response = connection
-        .show_options(scope, args.name, args.value_only)
+        .show_options(scope, args.name, args.value_only, include_inherited)
         .map_err(ExitFailure::from_client)?;
     match response {
         response if quiet && quiet_option_response(&response) => Ok(0),
@@ -224,6 +225,7 @@ mod tests {
 
     fn show_global_args(name: Option<&str>) -> ShowOptionsArgs {
         ShowOptionsArgs {
+            include_inherited: false,
             global: true,
             server: false,
             window: false,
@@ -449,6 +451,7 @@ mod tests {
         let scope = resolve_show_options_scope(
             ShowOptionsCommandKind::ShowWindowOptions,
             &ShowOptionsArgs {
+                include_inherited: false,
                 global: false,
                 server: false,
                 window: false,
@@ -475,6 +478,7 @@ mod tests {
         let scope = resolve_show_options_scope(
             ShowOptionsCommandKind::ShowWindowOptions,
             &ShowOptionsArgs {
+                include_inherited: false,
                 global: true,
                 server: false,
                 window: false,
@@ -498,6 +502,7 @@ mod tests {
         let scope = resolve_show_options_scope(
             ShowOptionsCommandKind::ShowOptions,
             &ShowOptionsArgs {
+                include_inherited: false,
                 global: true,
                 server: true,
                 window: false,
@@ -521,6 +526,7 @@ mod tests {
         let scope = resolve_show_options_scope(
             ShowOptionsCommandKind::ShowWindowOptions,
             &ShowOptionsArgs {
+                include_inherited: false,
                 global: true,
                 server: false,
                 window: false,

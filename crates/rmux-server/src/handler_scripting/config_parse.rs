@@ -188,6 +188,7 @@ pub(super) fn parse_show_options(
     let mut window = force_window;
     let mut pane = false;
     let mut value_only = false;
+    let mut include_inherited = false;
     let mut target = None;
     let mut name = None;
 
@@ -226,6 +227,10 @@ pub(super) fn parse_show_options(
                 let _ = args.optional();
                 value_only = true;
             }
+            "-A" => {
+                let _ = args.optional();
+                include_inherited = true;
+            }
             "-q" if force_window => return Err(unsupported_flag(command_name, "-q")),
             "-q" => {
                 let _ = args.optional();
@@ -245,6 +250,7 @@ pub(super) fn parse_show_options(
                         'w' if !force_window => window = true,
                         'p' if !force_window => pane = true,
                         'v' => value_only = true,
+                        'A' => include_inherited = true,
                         'q' if force_window => return Err(unsupported_flag(command_name, "-q")),
                         'q' => {}
                         's' => return Err(unsupported_flag(command_name, "-s")),
@@ -276,6 +282,7 @@ pub(super) fn parse_show_options(
         scope,
         name,
         value_only,
+        include_inherited,
     }))
 }
 
@@ -332,7 +339,7 @@ fn is_show_options_flag_cluster(token: &str) -> bool {
         && token.len() > 2
         && token[1..]
             .chars()
-            .all(|flag| matches!(flag, 'g' | 's' | 'w' | 'p' | 'v' | 'q'))
+            .all(|flag| matches!(flag, 'A' | 'g' | 's' | 'w' | 'p' | 'v' | 'q'))
 }
 
 fn build_global_or_session_scope(

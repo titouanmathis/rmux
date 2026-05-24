@@ -151,25 +151,23 @@ fn append_to_non_appendable_options_is_rejected_without_creating_overrides() {
 }
 
 #[test]
-fn allow_passthrough_rejects_all_until_all_pane_routing_exists() {
+fn allow_passthrough_preserves_all_for_tmux_compatibility() {
     let mut store = OptionStore::new();
+    let alpha = session_name("alpha");
 
-    let error = store
+    store
         .set(
             ScopeSelector::Global,
             OptionName::AllowPassthrough,
             "all".to_owned(),
             SetOptionMode::Replace,
         )
-        .expect_err("all-pane passthrough is not implemented");
+        .expect("tmux-compatible all value is accepted");
 
     assert_eq!(
-        error,
-        rmux_proto::RmuxError::InvalidSetOption(
-            "allow-passthrough expects one of: off, on".to_owned()
-        )
+        store.resolve_for_window(&alpha, 0, OptionName::AllowPassthrough),
+        Some("all")
     );
-    assert!(store.is_empty());
 }
 
 #[test]

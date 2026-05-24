@@ -21,6 +21,9 @@ use super::{session_not_found, HandlerState};
 #[path = "pane_outputs/submitted.rs"]
 mod submitted;
 
+#[path = "pane_outputs/exit_refresh.rs"]
+mod exit_refresh;
+
 pub(super) use self::submitted::AttachedSubmittedLine;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

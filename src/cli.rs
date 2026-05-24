@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 mod capture_pane;
 #[path = "cli/client_commands.rs"]
 mod client_commands;
+#[path = "cli/client_environment.rs"]
+mod client_environment;
 #[path = "cli/command_inventory.rs"]
 mod command_inventory;
 #[path = "cli/command_runner.rs"]

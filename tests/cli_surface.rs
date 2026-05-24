@@ -1320,13 +1320,18 @@ fn set_option_without_target_uses_current_scope_not_global() -> Result<(), Box<d
 
     assert_success(&harness.run(&["set-option", "status", "off"])?);
     let alpha_status = harness.run(&["show-options", "-v", "-t", "alpha", "status"])?;
-    assert_eq!(stdout(&alpha_status), "on\n");
+    assert_eq!(stdout(&alpha_status), "");
+    let alpha_status_inherited = harness.run(&["show-options", "-Av", "-t", "alpha", "status"])?;
+    assert_eq!(stdout(&alpha_status_inherited), "on\n");
     let beta_status = harness.run(&["show-options", "-v", "-t", "beta", "status"])?;
     assert_eq!(stdout(&beta_status), "off\n");
 
     assert_success(&harness.run(&["set-option", "mode-keys", "vi"])?);
     let alpha_mode = harness.run(&["show-options", "-wv", "-t", "alpha", "mode-keys"])?;
-    assert_eq!(stdout(&alpha_mode), "emacs\n");
+    assert_eq!(stdout(&alpha_mode), "");
+    let alpha_mode_inherited =
+        harness.run(&["show-options", "-wAv", "-t", "alpha", "mode-keys"])?;
+    assert_eq!(stdout(&alpha_mode_inherited), "emacs\n");
     let beta_mode = harness.run(&["show-options", "-wv", "-t", "beta", "mode-keys"])?;
     assert_eq!(stdout(&beta_mode), "vi\n");
 

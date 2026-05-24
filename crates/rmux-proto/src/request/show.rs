@@ -12,6 +12,9 @@ pub struct ShowOptionsRequest {
     pub name: Option<String>,
     /// Whether output should contain only values.
     pub value_only: bool,
+    /// Whether inherited options should be included, matching `show-options -A`.
+    #[serde(default)]
+    pub include_inherited: bool,
 }
 
 /// Request payload for `show-environment`.

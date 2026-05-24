@@ -15,6 +15,15 @@ impl RuntimeFormatContext<'_> {
         let stats = self.state?.pane_history_stats(session.name(), pane.id())?;
         Some(stats.all_bytes)
     }
+
+    fn pane_pipe(&self) -> Option<String> {
+        let session = self.session?;
+        let pane = self.pane?;
+        let window_index = self.window_index?;
+        Some(bool_string(self.state.is_some_and(|state| {
+            state.pane_has_pipe(session.name(), window_index, pane.id())
+        })))
+    }
 }
 
 impl FormatVariables for RuntimeFormatContext<'_> {
@@ -236,7 +245,7 @@ impl FormatVariables for RuntimeFormatContext<'_> {
             "pane_lifecycle_revision" | "pane_revision" => self.pane_lifecycle_revision(),
             "pane_output_sequence" => self.pane_output_sequence(),
             "pane_pid" => self.pane_pid(),
-            "pane_pipe" => Some("0".to_owned()),
+            "pane_pipe" => self.pane_pipe(),
             "pane_right" => self.pane.map(|pane| {
                 (pane.geometry().x() + pane.geometry().cols())
                     .saturating_sub(1)

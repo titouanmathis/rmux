@@ -131,6 +131,8 @@ pub(crate) struct SetEnvironmentArgs {
         .args(["server", "window", "pane"])
 ))]
 pub(crate) struct ShowOptionsArgs {
+    #[arg(short = 'A', action = ArgAction::SetTrue)]
+    pub(crate) include_inherited: bool,
     #[arg(short = 'g', action = ArgAction::SetTrue)]
     pub(crate) global: bool,
     #[arg(short = 's', action = ArgAction::SetTrue, group = "scope")]

@@ -56,10 +56,20 @@ impl RequestHandler {
         let (outcome, inline_hooks) = self
             .dispatch_captured(requester_pid, connection_id, request)
             .await;
+        let inline_hook_names = inline_hooks
+            .iter()
+            .map(|pending| pending.hook)
+            .collect::<Vec<_>>();
         self.run_inline_hooks(requester_pid, inline_hooks, None)
             .await;
-        self.run_request_hooks(requester_pid, &request_for_hooks, &outcome.response, None)
-            .await;
+        self.run_request_hooks(
+            requester_pid,
+            &request_for_hooks,
+            &outcome.response,
+            None,
+            &inline_hook_names,
+        )
+        .await;
         outcome
     }
 
@@ -123,7 +133,7 @@ impl RequestHandler {
                 HandleOutcome::response(self.handle_rename_session(request).await)
             }
             Request::NewWindow(request) => {
-                HandleOutcome::response(self.handle_new_window(request).await)
+                HandleOutcome::response(self.handle_new_window(requester_pid, request).await)
             }
             Request::KillWindow(request) => {
                 HandleOutcome::response(self.handle_kill_window(request).await)
@@ -162,13 +172,13 @@ impl RequestHandler {
                 HandleOutcome::response(self.handle_resize_window(request).await)
             }
             Request::RespawnWindow(request) => {
-                HandleOutcome::response(self.handle_respawn_window(request).await)
+                HandleOutcome::response(self.handle_respawn_window(requester_pid, request).await)
             }
             Request::SplitWindow(request) => {
-                HandleOutcome::response(self.handle_split_window(request).await)
+                HandleOutcome::response(self.handle_split_window(requester_pid, request).await)
             }
             Request::SplitWindowExt(request) => {
-                HandleOutcome::response(self.handle_split_window_ext(request).await)
+                HandleOutcome::response(self.handle_split_window_ext(requester_pid, request).await)
             }
             Request::SwapPane(request) => {
                 HandleOutcome::response(self.handle_swap_pane(request).await)
@@ -189,7 +199,7 @@ impl RequestHandler {
                 HandleOutcome::response(self.handle_pipe_pane(requester_pid, request).await)
             }
             Request::RespawnPane(request) => {
-                HandleOutcome::response(self.handle_respawn_pane(request).await)
+                HandleOutcome::response(self.handle_respawn_pane(requester_pid, request).await)
             }
             Request::KillPane(request) => {
                 HandleOutcome::response(self.handle_kill_pane(request).await)

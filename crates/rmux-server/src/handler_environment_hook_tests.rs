@@ -4,9 +4,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::RequestHandler;
 use rmux_core::LifecycleEvent;
 use rmux_proto::{
-    ErrorResponse, HookLifecycle, HookName, NewSessionRequest, NewWindowRequest, OptionName,
-    Request, Response, RmuxError, ScopeSelector, SessionName, SetEnvironmentRequest,
-    SetHookRequest, SetOptionMode, SetOptionRequest, ShowOptionsRequest, TerminalSize,
+    ErrorResponse, HookLifecycle, HookName, NewSessionExtRequest, NewSessionRequest,
+    NewWindowRequest, OptionName, Request, Response, RmuxError, ScopeSelector, SessionName,
+    SetEnvironmentRequest, SetHookRequest, SetOptionMode, SetOptionRequest, ShowOptionsRequest,
+    TerminalSize,
 };
 
 fn session_name(value: &str) -> SessionName {
@@ -634,6 +635,7 @@ async fn after_show_options_runs_without_triggering_nested_notify_hooks() {
                 scope: rmux_proto::OptionScopeSelector::SessionGlobal,
                 name: None,
                 value_only: false,
+                include_inherited: true,
             }))
             .await,
         Response::ShowOptions(_)
@@ -652,7 +654,7 @@ async fn after_show_options_runs_without_triggering_nested_notify_hooks() {
 }
 
 #[tokio::test]
-async fn split_window_runs_explicit_and_generic_after_hooks() {
+async fn split_window_runs_after_hook_once() {
     let handler = RequestHandler::new();
     let output_path = temp_path("after-split-window");
     let shell_command = append_x_command(&output_path);
@@ -682,7 +684,7 @@ async fn split_window_runs_explicit_and_generic_after_hooks() {
 
     assert_eq!(
         fs::read_to_string(&output_path).expect("split hook output exists"),
-        "xx"
+        "x"
     );
     let _ = fs::remove_file(output_path);
 }
@@ -872,6 +874,51 @@ async fn environment_override_layering_session_then_override_then_rmux_pane() {
     assert_eq!(pane_zero.environment_value("MY_VAR"), Some("override"));
     // RMUX_PANE must still be present despite -e.
     assert!(pane_zero.environment_value("RMUX_PANE").is_some());
+}
+
+#[tokio::test]
+async fn new_session_ext_client_environment_seeds_initial_pane() {
+    let handler = RequestHandler::new();
+    let session = session_name("client-env");
+
+    let response = handler
+        .handle(Request::NewSessionExt(NewSessionExtRequest {
+            session_name: Some(session.clone()),
+            working_directory: None,
+            detached: true,
+            size: Some(TerminalSize { cols: 80, rows: 24 }),
+            environment: None,
+            group_target: None,
+            attach_if_exists: false,
+            detach_other_clients: false,
+            kill_other_clients: false,
+            flags: None,
+            window_name: None,
+            print_session_info: false,
+            print_format: None,
+            command: None,
+            process_command: None,
+            client_environment: Some(vec![
+                "PATH=/tmp/rmux-client-bin:/usr/bin".to_owned(),
+                "RMUX_CLIENT_ENV_SENTINEL=from-client".to_owned(),
+            ]),
+        }))
+        .await;
+
+    assert!(matches!(response, Response::NewSession(_)));
+
+    let state = handler.state.lock().await;
+    let pane_zero = state
+        .pane_profile(&session, 0)
+        .expect("pane 0 profile exists");
+    assert_eq!(
+        pane_zero.environment_value("PATH"),
+        Some("/tmp/rmux-client-bin:/usr/bin")
+    );
+    assert_eq!(
+        pane_zero.environment_value("RMUX_CLIENT_ENV_SENTINEL"),
+        Some("from-client")
+    );
 }
 
 fn shell_quote_str(value: &str) -> String {

@@ -263,6 +263,49 @@ async fn allow_passthrough_mutations_refresh_attached_targets() {
 }
 
 #[tokio::test]
+async fn allow_passthrough_all_uses_active_pane_gate_for_now() {
+    let handler = RequestHandler::new();
+    let requester_pid = 43;
+    let alpha = session_name("alpha");
+
+    let created = handler
+        .handle(Request::NewSession(NewSessionRequest {
+            session_name: alpha.clone(),
+            detached: true,
+            size: Some(TerminalSize { cols: 80, rows: 24 }),
+            environment: None,
+        }))
+        .await;
+    assert!(matches!(created, Response::NewSession(_)));
+
+    let (control_tx, mut control_rx) = mpsc::unbounded_channel();
+    let _attach_id = handler
+        .register_attach_with_terminal_context(
+            requester_pid,
+            alpha,
+            control_tx,
+            OuterTerminalContext::from_pairs(&[("TERM", "xterm-kitty")]),
+        )
+        .await;
+
+    let set = handler
+        .handle(Request::SetOption(SetOptionRequest {
+            scope: ScopeSelector::Global,
+            option: OptionName::AllowPassthrough,
+            value: "all".to_owned(),
+            mode: SetOptionMode::Replace,
+        }))
+        .await;
+    assert!(matches!(set, Response::SetOption(_)));
+
+    let target = take_switch_target(control_rx.try_recv().expect("passthrough refresh"));
+    assert!(
+        target.kitty_graphics_passthrough,
+        "all is accepted and currently shares the active-pane passthrough path"
+    );
+}
+
+#[tokio::test]
 async fn kitty_passthrough_is_disabled_while_active_pane_is_in_copy_mode() {
     let handler = RequestHandler::new();
     let requester_pid = 43;

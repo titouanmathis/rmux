@@ -366,13 +366,20 @@ impl OuterTerminal {
     }
 
     fn mouse_sequence(&self) -> Option<String> {
-        (self.supports_mouse && self.mouse_reporting_enabled)
-            .then_some("\x1b[?1006h\x1b[?1002h\x1b[?1000h".to_owned())
+        // Match tmux's defensive mouse-mode reset before enabling reporting.
+        // Some terminals keep partially enabled mouse modes across alternate-screen
+        // transitions; clearing every supported protocol first prevents wheel input
+        // from being translated to cursor keys instead of mouse events.
+        (self.supports_mouse && self.mouse_reporting_enabled).then_some(
+            "\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\
+             \x1b[?1006h\x1b[?1002h\x1b[?1000h"
+                .to_owned(),
+        )
     }
 
     fn disable_mouse_sequence(&self) -> Option<String> {
         self.supports_mouse
-            .then_some("\x1b[?1000l\x1b[?1002l\x1b[?1006l".to_owned())
+            .then_some("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l".to_owned())
     }
 
     fn extkeys_sequence(&self) -> Option<String> {

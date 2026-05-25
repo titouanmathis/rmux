@@ -59,6 +59,56 @@ fn terminal_overrides_apply_legacy_tc_xt_and_ax_flags() {
 }
 
 #[test]
+fn mouse_attach_sequence_resets_mouse_modes_before_enabling_reporting() {
+    let mut options = OptionStore::new();
+    options
+        .set(
+            ScopeSelector::Global,
+            OptionName::Mouse,
+            "on".to_owned(),
+            SetOptionMode::Replace,
+        )
+        .expect("mouse set succeeds");
+
+    let terminal = OuterTerminal::resolve_for_session(
+        &options,
+        Some(&session_name("alpha")),
+        OuterTerminalContext::from_pairs(&[("TERM", "xterm-256color")]),
+    );
+
+    let start = String::from_utf8(terminal.attach_start_sequence()).expect("utf8");
+    let stop = String::from_utf8(terminal.attach_stop_sequence()).expect("utf8");
+
+    for sequence in [
+        "\u{1b}[?1000l",
+        "\u{1b}[?1002l",
+        "\u{1b}[?1003l",
+        "\u{1b}[?1005l",
+        "\u{1b}[?1006l",
+    ] {
+        assert!(
+            start.contains(sequence),
+            "attach should reset mouse mode {sequence:?} before enabling reporting"
+        );
+        assert!(
+            stop.contains(sequence),
+            "detach should reset mouse mode {sequence:?}"
+        );
+    }
+
+    let disable_sgr = start
+        .find("\u{1b}[?1006l")
+        .expect("attach should disable SGR mouse first");
+    let enable_sgr = start
+        .find("\u{1b}[?1006h")
+        .expect("attach should enable SGR mouse after reset");
+    assert!(
+        disable_sgr < enable_sgr,
+        "mouse modes must be reset before SGR mouse is enabled"
+    );
+}
+
+#[test]
 fn attach_sequences_follow_focus_and_extended_key_options() {
     let mut options = OptionStore::new();
     options

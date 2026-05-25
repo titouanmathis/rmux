@@ -100,6 +100,10 @@ fn terminal_profile_sets_rmux_term_shell_and_pane_context() {
         profile.environment_value("RMUX"),
         Some(expected_rmux.as_str())
     );
+    assert_eq!(
+        profile.environment_value("TMUX"),
+        Some(expected_rmux.as_str())
+    );
     assert_eq!(profile.environment_value("RMUX_PANE"), Some("%3"));
     assert_eq!(profile.environment_value("FOO"), Some("bar"));
     let expected_cwd = std::env::temp_dir();

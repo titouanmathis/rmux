@@ -64,6 +64,19 @@ fn default_store_loads_prefix_root_and_copy_tables() {
 }
 
 #[test]
+fn default_wheel_up_enters_copy_mode_and_scrolls_immediately() {
+    let store = KeyBindingStore::default();
+    let command = store
+        .get_binding("root", key_string_lookup_string("WheelUpPane").unwrap())
+        .expect("default wheel-up binding")
+        .commands()
+        .to_tmux_string();
+
+    assert!(command.contains("copy-mode -e"));
+    assert!(command.contains("send-keys -X -N 5 scroll-up"));
+}
+
+#[test]
 fn reset_restores_defaults_from_snapshot() {
     let mut store = KeyBindingStore::default();
     let original = store

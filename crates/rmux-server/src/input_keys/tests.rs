@@ -532,6 +532,19 @@ fn vt10x_navigation_keys_match_tmux_standard_sequences() {
 }
 
 #[test]
+fn unmodified_navigation_keys_fall_back_to_vt10x_in_extended_modes() {
+    let up = parse_key("Up");
+    assert_eq!(
+        encode_key(mode::MODE_KEYS_EXTENDED, ExtendedKeyFormat::Xterm, up).expect("mode 1 up"),
+        b"\x1b[A"
+    );
+    assert_eq!(
+        encode_key(mode::MODE_KEYS_EXTENDED_2, ExtendedKeyFormat::Xterm, up).expect("mode 2 up"),
+        b"\x1b[A"
+    );
+}
+
+#[test]
 fn golden_standard_key_trace_for_navigation_and_modifiers() {
     let keys = [
         "Up", "Down", "Left", "Right", "Home", "End", "DC", "PageUp", "PageDown", "BTab", "F1",

@@ -54,9 +54,11 @@ pub(crate) fn encode_key(
     }
 
     if (pane_mode & mode::MODE_KEYS_EXTENDED_2) != 0 {
-        input_key_extended(key, format)
+        input_key_extended(key, format).or_else(|| input_key_vt10x(pane_mode, key))
     } else if (pane_mode & mode::MODE_KEYS_EXTENDED) != 0 {
-        input_key_mode1(key).or_else(|| input_key_extended(key, format))
+        input_key_mode1(key)
+            .or_else(|| input_key_extended(key, format))
+            .or_else(|| input_key_vt10x(pane_mode, key))
     } else {
         input_key_vt10x(pane_mode, key)
     }

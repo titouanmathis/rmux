@@ -595,3 +595,6 @@ mod server_lifecycle;
 
 #[path = "handler_attach_tests/client_security.rs"]
 mod client_security;
+
+#[path = "handler_attach_tests/mouse_wheel_scroll.rs"]
+mod mouse_wheel_scroll;

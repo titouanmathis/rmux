@@ -56,15 +56,18 @@ impl TerminalProfile {
             resolved.remove("TERM_PROGRAM_VERSION");
         }
 
-        resolved.insert(
-            "RMUX".to_owned(),
-            format!(
-                "{},{},{}",
-                socket_path.display(),
-                std::process::id(),
-                session_id
-            ),
+        let multiplexer_env = format!(
+            "{},{},{}",
+            socket_path.display(),
+            std::process::id(),
+            session_id
         );
+        resolved.insert("RMUX".to_owned(), multiplexer_env.clone());
+        // Many terminal applications gate tmux-specific keyboard/mouse handling
+        // on the presence of $TMUX. RMUX presents a tmux-compatible TERM and
+        // key protocol surface, so expose the same shape to improve
+        // compatibility while keeping $RMUX available for RMUX-native clients.
+        resolved.insert("TMUX".to_owned(), multiplexer_env);
 
         if let Some(overrides) = overrides {
             for (name, value) in parse_environment_assignments(overrides)? {
@@ -126,15 +129,14 @@ impl TerminalProfile {
             );
         }
 
-        resolved.insert(
-            "RMUX".to_owned(),
-            format!(
-                "{},{},{}",
-                socket_path.display(),
-                std::process::id(),
-                session_id.map_or(-1_i32, |id| i32::try_from(id).unwrap_or(i32::MAX))
-            ),
+        let multiplexer_env = format!(
+            "{},{},{}",
+            socket_path.display(),
+            std::process::id(),
+            session_id.map_or(-1_i32, |id| i32::try_from(id).unwrap_or(i32::MAX))
         );
+        resolved.insert("RMUX".to_owned(), multiplexer_env.clone());
+        resolved.insert("TMUX".to_owned(), multiplexer_env);
 
         let cwd = resolve_working_directory(requested_cwd)?;
         let shell = resolve_shell_path(options, session_name, &resolved);

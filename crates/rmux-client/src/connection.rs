@@ -62,6 +62,9 @@ pub fn resolve_socket_path(
 }
 
 /// Result of attempting to connect to the RMUX server.
+// Keep the successful path as an owned public `Connection`; boxing would add an
+// unnecessary API wrinkle around the small absent-server control-flow case.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum ConnectResult {
     /// Successfully connected to the server.

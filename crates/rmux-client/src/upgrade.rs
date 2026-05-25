@@ -227,9 +227,9 @@ fn kill_server_command(socket_path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        classify_stale_daemon, inspect_daemon, request_idle_shutdown, DaemonFreshness, StaleDaemon,
-    };
+    use super::{classify_stale_daemon, DaemonFreshness, StaleDaemon};
+    #[cfg(unix)]
+    use super::{inspect_daemon, request_idle_shutdown};
 
     #[cfg(unix)]
     use std::io::{Read, Write};

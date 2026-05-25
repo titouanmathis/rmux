@@ -622,7 +622,7 @@ fn hidden_daemon_command(
 }
 
 fn spawn_hidden_daemon(mut command: Command) -> io::Result<()> {
-    let child = command.spawn()?;
+    let child = rmux_os::daemon::spawn_hidden_daemon_command(&mut command)?;
     // Intentionally drop without `wait()`: the daemon must outlive the
     // short-lived client process that launched it.
     drop(child);

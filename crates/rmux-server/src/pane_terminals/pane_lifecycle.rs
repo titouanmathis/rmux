@@ -14,8 +14,9 @@ use crate::terminal::{validate_process_command, TerminalProfile};
 
 use super::lifecycle_state::terminal_size_from_geometry;
 use super::{
-    pane_terminal_geometry_for_session, session_not_found, HandlerState, KilledPaneHookContext,
-    KilledPaneResult, PaneLifecycleSpawn, PaneOutputSpawn, WindowSpawnOptions,
+    pane_terminal_geometry_for_session, session_not_found, HandlerState, InitialPaneSpawnOptions,
+    KilledPaneHookContext, KilledPaneResult, PaneLifecycleSpawn, PaneOutputSpawn,
+    WindowSpawnOptions,
 };
 
 #[path = "pane_lifecycle/preview.rs"]
@@ -36,11 +37,7 @@ impl HandlerState {
     pub(crate) fn insert_initial_session_terminal(
         &mut self,
         session_name: &SessionName,
-        socket_path: &Path,
-        environment_overrides: Option<&[String]>,
-        command: Option<&ProcessCommand>,
-        pane_alert_callback: Option<PaneAlertCallback>,
-        pane_exit_callback: Option<PaneExitCallback>,
+        spawn: InitialPaneSpawnOptions<'_>,
     ) -> Result<(), RmuxError> {
         let pane = initial_pane(&self.sessions, session_name)?;
         let runtime_session_name =
@@ -63,22 +60,28 @@ impl HandlerState {
                 pane_terminal_geometry_for_session(session, &self.options, pane.geometry),
             )
         };
-        let profile = TerminalProfile::for_session(
+        let profile = TerminalProfile::for_initial_session_pane(
             &self.environment,
             &self.options,
             session_name,
             session_id.as_u32(),
-            socket_path,
+            spawn.socket_path,
+            spawn.spawn_environment,
             true,
-            environment_overrides,
+            spawn.environment_overrides,
             Some(pane.id),
             requested_cwd,
         )?;
-        let automatic_window_name = profile.automatic_window_name(command);
-        let runtime_window_name = profile.runtime_window_name(command);
+        let automatic_window_name = profile.automatic_window_name(spawn.command);
+        let runtime_window_name = profile.runtime_window_name(spawn.command);
+        let initial_title = profile.initial_pane_title();
         let lifecycle_cwd = profile.cwd().to_path_buf();
-        let terminal =
-            open_pane_terminal(pane_geometry, profile, runtime_window_name.clone(), command)?;
+        let terminal = open_pane_terminal(
+            pane_geometry,
+            profile,
+            runtime_window_name.clone(),
+            spawn.command,
+        )?;
         let pid = terminal.pid();
         let output_reader = clone_terminal_for_output_reader(&terminal, session_name, pane.id)?;
         #[cfg(windows)]
@@ -93,11 +96,12 @@ impl HandlerState {
             pane.id,
             PaneOutputSpawn {
                 geometry: pane_geometry,
+                initial_title,
                 output_reader,
                 #[cfg(windows)]
                 exit_watcher: Some(exit_watcher),
-                pane_alert_callback,
-                pane_exit_callback,
+                pane_alert_callback: spawn.pane_alert_callback,
+                pane_exit_callback: spawn.pane_exit_callback,
             },
         ) {
             let _ = self.terminals.remove_session(&runtime_session_name);
@@ -107,9 +111,9 @@ impl HandlerState {
             session_id,
             window_id,
             pane_id: pane.id,
-            command: command.map(ProcessCommand::display_command),
+            command: spawn.command.map(ProcessCommand::display_command),
             working_directory: Some(lifecycle_cwd),
-            private_environment: environment_overrides.map(<[String]>::to_vec),
+            private_environment: spawn.environment_overrides.map(<[String]>::to_vec),
             dimensions: terminal_size_from_geometry(pane.geometry),
             pid: Some(pid),
         });
@@ -120,11 +124,22 @@ impl HandlerState {
     }
 
     pub(crate) fn resize_terminals(&mut self, session_name: &SessionName) -> Result<(), RmuxError> {
+        let session_size = self
+            .sessions
+            .session(session_name)
+            .ok_or_else(|| session_not_found(session_name))?
+            .window()
+            .size();
+        let terminal_pixels = self.attached_terminal_pixels.get(session_name).copied();
         for (runtime_session_name, pane_geometries) in
             self.session_pane_terminal_geometries_by_runtime(session_name)?
         {
-            self.terminals
-                .resize_session(&runtime_session_name, &pane_geometries)?;
+            self.terminals.resize_session(
+                &runtime_session_name,
+                &pane_geometries,
+                session_size,
+                terminal_pixels,
+            )?;
             self.resize_transcripts(&runtime_session_name, &pane_geometries);
         }
         self.sync_pane_lifecycle_dimensions_for_session(session_name);
@@ -188,6 +203,7 @@ impl HandlerState {
             session_name,
             session_id.as_u32(),
             spawn.socket_path,
+            spawn.spawn_environment,
             true,
             spawn.environment_overrides,
             Some(pane_id),
@@ -198,6 +214,7 @@ impl HandlerState {
         )?;
         let automatic_window_name = profile.automatic_window_name(spawn.command);
         let runtime_window_name = profile.runtime_window_name(spawn.command);
+        let initial_title = profile.initial_pane_title();
         let lifecycle_cwd = profile.cwd().to_path_buf();
         let terminal = open_pane_terminal(
             pane_geometry,
@@ -221,6 +238,7 @@ impl HandlerState {
         )?;
         let output_spawn = PaneOutputSpawn {
             geometry: pane_geometry,
+            initial_title,
             output_reader,
             #[cfg(windows)]
             exit_watcher: Some(exit_watcher),
@@ -422,6 +440,7 @@ impl HandlerState {
         &mut self,
         request: RespawnPaneRequest,
         socket_path: &Path,
+        spawn_environment: Option<&std::collections::HashMap<String, String>>,
         pane_alert_callback: Option<PaneAlertCallback>,
         pane_exit_callback: Option<PaneExitCallback>,
         mut on_replaced_active_pane: impl FnMut(&mut Self, &KilledPaneHookContext),
@@ -485,6 +504,7 @@ impl HandlerState {
             &session_name,
             session_id.as_u32(),
             socket_path,
+            spawn_environment,
             true,
             environment.as_deref(),
             Some(pane_id),
@@ -492,6 +512,7 @@ impl HandlerState {
         )?;
         let automatic_window_name = profile.automatic_window_name(process_command.as_ref());
         let runtime_window_name = profile.runtime_window_name(process_command.as_ref());
+        let initial_title = profile.initial_pane_title();
         let lifecycle_cwd = profile.cwd().to_path_buf();
         let terminal = open_pane_terminal(
             pane_geometry,
@@ -533,6 +554,7 @@ impl HandlerState {
             pane_id,
             PaneOutputSpawn {
                 geometry: pane_geometry,
+                initial_title,
                 output_reader,
                 #[cfg(windows)]
                 exit_watcher: Some(exit_watcher),

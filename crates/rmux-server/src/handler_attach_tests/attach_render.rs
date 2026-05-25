@@ -46,6 +46,7 @@ async fn session_target_refreshes_follow_the_current_active_window() {
                     start_directory: None,
                     command: None,
                     socket_path: Path::new("/tmp/rmux-test.sock"),
+                    spawn_environment: None,
                     environment_overrides: None,
                     pane_alert_callback: None,
                     pane_exit_callback: None,
@@ -123,6 +124,7 @@ async fn attach_session_upgrade_renders_only_the_active_window() {
                 start_directory: None,
                 command: None,
                 socket_path: Path::new("/tmp/rmux-test.sock"),
+                spawn_environment: None,
                 environment_overrides: None,
                 pane_alert_callback: None,
                 pane_exit_callback: None,
@@ -203,6 +205,41 @@ async fn attach_session_render_frame_positions_cursor_at_active_pane_cursor() {
         render_frame.contains("\x1b[1;9H"),
         "attach frame must restore the active pane cursor, got {render_frame:?}"
     );
+}
+
+#[tokio::test]
+async fn attach_session_active_pane_geometry_tracks_top_status_offset() {
+    let handler = RequestHandler::new();
+    let alpha = session_name("alpha");
+
+    create_quiet_session(&handler, &alpha).await;
+    assert!(matches!(
+        handler
+            .handle(Request::SetOption(SetOptionRequest {
+                scope: ScopeSelector::Global,
+                option: OptionName::StatusPosition,
+                value: "top".to_owned(),
+                mode: SetOptionMode::Replace,
+            }))
+            .await,
+        Response::SetOption(_)
+    ));
+
+    let outcome = handler
+        .dispatch(
+            std::process::id(),
+            Request::AttachSession(rmux_proto::AttachSessionRequest { target: alpha }),
+        )
+        .await;
+
+    assert!(matches!(outcome.response, Response::AttachSession(_)));
+    let target = outcome.attach.expect("attach upgrade").target;
+    assert_eq!(
+        target.active_pane_geometry.y(),
+        1,
+        "kitty passthrough coordinates must share the renderer's top-status content offset"
+    );
+    assert_eq!(target.active_pane_geometry.rows(), 23);
 }
 
 #[tokio::test]

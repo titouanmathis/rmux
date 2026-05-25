@@ -13,6 +13,7 @@ use super::{
     run_command_resolved, run_payload_command, unexpected_response, write_command_output,
     ExitFailure, StartupOptions,
 };
+use crate::cli::client_environment::client_environment_assignments;
 use crate::cli_args::{
     KillSessionArgs, ListSessionsArgs, NewSessionArgs, RenameSessionArgs, SessionTargetArgs,
 };
@@ -46,6 +47,7 @@ pub(super) fn run_new_session(
             print_format: args.print_format,
             command: (!args.command.is_empty()).then_some(args.command),
             process_command: None,
+            client_environment: Some(client_environment_assignments()),
         })
         .map_err(ExitFailure::from_client)?;
     let output = response.command_output().cloned();

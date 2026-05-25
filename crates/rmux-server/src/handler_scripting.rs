@@ -4,16 +4,11 @@ use rmux_core::{
     LifecycleEvent, ENVIRON_HIDDEN,
 };
 use rmux_proto::request::Request;
-use rmux_proto::{
-    CommandOutput, ErrorResponse, HookName, NewWindowRequest, PaneTarget, Response, RmuxError,
-    ScopeSelector, Target,
-};
+use rmux_proto::{CommandOutput, Response, RmuxError, ScopeSelector};
 use std::collections::VecDeque;
 
 use super::RequestHandler;
 use crate::control::ControlCommandResult;
-use crate::hook_runtime::{capture_inline_hooks, PendingInlineHookFormat};
-use crate::pane_terminals::{NewWindowOptions, WindowSpawnOptions};
 
 #[path = "handler_scripting/buffer_parse.rs"]
 mod buffer_parse;
@@ -37,6 +32,8 @@ mod layout_parse;
 mod list_parse;
 #[path = "handler_scripting/mode_parse.rs"]
 mod mode_parse;
+#[path = "handler_scripting/new_window_runtime.rs"]
+mod new_window_runtime;
 #[path = "handler_scripting/pane_parse.rs"]
 mod pane_parse;
 #[path = "handler_scripting/prompt_parse.rs"]
@@ -63,6 +60,8 @@ mod source_files;
 mod source_runtime;
 #[path = "handler_scripting/targets.rs"]
 mod targets;
+#[path = "handler_scripting/tmux_compat.rs"]
+mod tmux_compat;
 #[path = "handler_scripting/tokens.rs"]
 mod tokens;
 #[path = "handler_scripting/values.rs"]
@@ -76,7 +75,6 @@ pub(super) use self::format_context::format_context_for_target;
 pub(super) use self::prompt_parse::{ParsedPromptHistoryCommand, PromptHistoryAction};
 use self::queue::{queue_action_from_response, remove_group_contexts, QueueInvocation, QueueMode};
 pub(super) use self::queue::{QueueCommandAction, QueueExecutionContext};
-use self::queue_parse::ParsedNewWindowCommand;
 use self::request_parse::parse_queue_invocation;
 #[cfg(test)]
 pub(crate) use self::request_parse::parse_request_from_parts;
@@ -152,6 +150,55 @@ impl RequestHandler {
             QueueMode::Control,
         )
         .await
+    }
+
+    pub(in crate::handler) async fn start_attached_prompt_binding_commands(
+        &self,
+        requester_pid: u32,
+        commands: &ParsedCommands,
+        context: &QueueExecutionContext,
+    ) -> Result<bool, RmuxError> {
+        if commands.commands().len() != 1 {
+            return Ok(false);
+        }
+
+        self.apply_parse_time_assignments(commands).await;
+        let command = commands
+            .commands()
+            .first()
+            .expect("single command checked")
+            .clone();
+        let attached_session = self.current_session_candidate(requester_pid).await;
+        let invocation = {
+            let state = self.state.lock().await;
+            let find_context = queue_target_find_context(
+                &state.sessions,
+                requester_pid,
+                attached_session.as_ref(),
+                context.current_target.as_ref(),
+                context.mouse_target.as_ref(),
+            );
+            parse_queue_invocation(
+                command,
+                context.caller_cwd.as_deref(),
+                &state.sessions,
+                &find_context,
+            )
+        }?;
+
+        match invocation {
+            QueueInvocation::CommandPrompt(command) => {
+                self.start_attached_command_prompt_binding(requester_pid, command, context)
+                    .await?;
+                Ok(true)
+            }
+            QueueInvocation::ConfirmBefore(command) => {
+                self.start_attached_confirm_before_binding(requester_pid, command, context)
+                    .await?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 
     #[async_recursion::async_recursion]
@@ -283,6 +330,10 @@ impl RequestHandler {
                     request,
                 ))
                 .await;
+                let inline_hook_names = inline_hooks
+                    .iter()
+                    .map(|pending| pending.hook)
+                    .collect::<Vec<_>>();
                 self.run_inline_hooks(requester_pid, inline_hooks, Some(&command_for_hooks))
                     .await;
                 self.run_request_hooks(
@@ -290,6 +341,7 @@ impl RequestHandler {
                     &request_for_hooks,
                     &outcome.response,
                     Some(&command_for_hooks),
+                    &inline_hook_names,
                 )
                 .await;
                 match mode {
@@ -351,98 +403,6 @@ impl RequestHandler {
         }
 
         result
-    }
-
-    async fn execute_queued_new_window(
-        &self,
-        requester_pid: u32,
-        command: ParsedNewWindowCommand,
-    ) -> Result<QueueCommandAction, RmuxError> {
-        let ParsedNewWindowCommand {
-            target,
-            target_window_index,
-            insert_at_target,
-            name,
-            detached,
-            start_directory,
-            environment,
-            command,
-        } = command;
-
-        let can_write = self.requester_can_write(requester_pid).await;
-        let request_for_hooks = crate::server_access::apply_access_policy(
-            Request::NewWindow(NewWindowRequest {
-                target: target.clone(),
-                name: name.clone(),
-                detached,
-                environment: environment.clone(),
-                command: command.clone(),
-                start_directory: start_directory.clone(),
-                target_window_index,
-                insert_at_target,
-            }),
-            can_write,
-        )?;
-
-        let socket_path = self.socket_path();
-        let process_command = rmux_proto::ProcessCommand::from_legacy_command(command.as_deref());
-        let (response, inline_hooks) = capture_inline_hooks(async {
-            let response = {
-                let mut state = self.state.lock().await;
-                match state.create_window_at_requested_index(
-                    &target,
-                    target_window_index,
-                    insert_at_target,
-                    NewWindowOptions {
-                        name,
-                        detached,
-                        spawn: WindowSpawnOptions {
-                            start_directory: start_directory.as_deref(),
-                            command: process_command.as_ref(),
-                            socket_path: &socket_path,
-                            environment_overrides: environment.as_deref(),
-                            pane_alert_callback: Some(self.pane_alert_callback()),
-                            pane_exit_callback: Some(self.pane_exit_callback()),
-                        },
-                    },
-                ) {
-                    Ok(response) => Response::NewWindow(response),
-                    Err(error) => Response::Error(ErrorResponse { error }),
-                }
-            };
-
-            if matches!(response, Response::NewWindow(_)) {
-                self.sync_session_silence_timers(&target).await;
-                if let Response::NewWindow(success) = &response {
-                    self.queue_inline_hook(
-                        HookName::AfterNewWindow,
-                        ScopeSelector::Session(target.clone()),
-                        Some(Target::Pane(PaneTarget::with_window(
-                            success.target.session_name().clone(),
-                            success.target.window_index(),
-                            0,
-                        ))),
-                        PendingInlineHookFormat::AfterCommand,
-                    );
-                    self.emit(LifecycleEvent::WindowLinked {
-                        session_name: target.clone(),
-                        target: Some(success.target.clone()),
-                    })
-                    .await;
-                }
-                self.refresh_attached_session(&target).await;
-            }
-
-            response
-        })
-        .await;
-
-        self.run_inline_hooks(requester_pid, inline_hooks, None)
-            .await;
-        self.run_request_hooks(requester_pid, &request_for_hooks, &response, None)
-            .await;
-
-        queue_action_from_response(response)
     }
 
     async fn apply_parse_time_assignments(&self, commands: &ParsedCommands) {
@@ -518,6 +478,22 @@ impl RequestHandler {
             }
         }
 
+        if matches!(request, Request::NewSession(_) | Request::NewSessionExt(_)) {
+            if let Response::NewSession(response) = &outcome.response {
+                if !response.detached
+                    && self
+                        .attach_control_to_existing_session(requester_pid, &response.session_name)
+                        .await
+                {
+                    self.emit(LifecycleEvent::ClientSessionChanged {
+                        session_name: response.session_name.clone(),
+                        client_name: Some(requester_pid.to_string()),
+                    })
+                    .await;
+                }
+            }
+        }
+
         queue_action_from_response(outcome.response)
     }
 }
@@ -528,45 +504,15 @@ fn command_parse_error_to_rmux(error: CommandParseError) -> RmuxError {
 
 #[cfg(test)]
 mod tests {
-    use super::source_files::default_config_paths;
+    use super::source_files::{default_config_paths, default_tmux_fallback_paths};
     #[cfg(windows)]
-    use super::source_files::source_inputs_for_path;
-    use std::sync::{Mutex, OnceLock};
-
-    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    struct EnvVarGuard {
-        name: &'static str,
-        previous: Option<String>,
-    }
-
-    impl EnvVarGuard {
-        fn set(name: &'static str, value: Option<&str>) -> Self {
-            let previous = std::env::var(name).ok();
-            match value {
-                Some(value) => std::env::set_var(name, value),
-                None => std::env::remove_var(name),
-            }
-            Self { name, previous }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(value) => std::env::set_var(self.name, value),
-                None => std::env::remove_var(self.name),
-            }
-        }
-    }
+    use super::source_files::{source_inputs_for_path, SourceReadPolicy};
+    use crate::test_env::EnvVarGuard;
 
     #[cfg(unix)]
     #[test]
     fn default_config_paths_use_rmux_locations() {
-        let _lock = ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("env lock");
+        let _lock = crate::test_env::lock_blocking();
         let _home = EnvVarGuard::set("HOME", Some("/tmp/rmux-home"));
         let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", Some("/tmp/rmux-xdg"));
 
@@ -587,13 +533,43 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn tmux_fallback_paths_use_tmux_locations() {
+        let _lock = crate::test_env::lock_blocking();
+        let _disable = EnvVarGuard::set("RMUX_DISABLE_TMUX_FALLBACK", None);
+        let _home = EnvVarGuard::set("HOME", Some("/tmp/rmux-home"));
+        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", Some("/tmp/rmux-xdg"));
+
+        let paths = default_tmux_fallback_paths();
+
+        assert_eq!(
+            paths,
+            vec![
+                "/etc/tmux.conf".to_owned(),
+                "/tmp/rmux-home/.tmux.conf".to_owned(),
+                "/tmp/rmux-xdg/tmux/tmux.conf".to_owned(),
+                "/tmp/rmux-home/.config/tmux/tmux.conf".to_owned(),
+            ]
+        );
+        assert!(
+            paths.iter().all(|path| !path.ends_with("rmux.conf")),
+            "tmux fallback paths must not include rmux config files: {paths:?}"
+        );
+    }
+
+    #[test]
+    fn tmux_fallback_paths_can_be_disabled_by_env() {
+        let _lock = crate::test_env::lock_blocking();
+        let _disable = EnvVarGuard::set("RMUX_DISABLE_TMUX_FALLBACK", Some("1"));
+
+        assert!(default_tmux_fallback_paths().is_empty());
+    }
+
     #[cfg(windows)]
     #[test]
     fn default_config_paths_use_documented_windows_locations() {
-        let _lock = ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("env lock");
+        let _lock = crate::test_env::lock_blocking();
         let _rmux_config = EnvVarGuard::set("RMUX_CONFIG_FILE", Some(r"C:\rmux\custom.conf"));
         let _appdata = EnvVarGuard::set("APPDATA", Some(r"C:\Users\tester\AppData\Roaming"));
         let _userprofile = EnvVarGuard::set("USERPROFILE", Some(r"C:\Users\tester"));
@@ -626,14 +602,41 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn windows_nul_config_path_is_empty() {
-        let inputs = source_inputs_for_path("NUL", None, false, None)
-            .expect("NUL should behave like an empty config file");
-        assert!(inputs.is_empty());
+    fn tmux_fallback_paths_use_documented_windows_tmux_locations() {
+        let _lock = crate::test_env::lock_blocking();
+        let _disable = EnvVarGuard::set("RMUX_DISABLE_TMUX_FALLBACK", None);
+        let _appdata = EnvVarGuard::set("APPDATA", Some(r"C:\Users\tester\AppData\Roaming"));
+        let _userprofile = EnvVarGuard::set("USERPROFILE", Some(r"C:\Users\tester"));
+        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", Some(r"C:\Users\tester\.config"));
 
-        let inputs = source_inputs_for_path("nul", None, false, None)
+        let paths = default_tmux_fallback_paths();
+
+        assert_eq!(
+            paths,
+            vec![
+                path_string(r"C:\Users\tester\.config\tmux\tmux.conf"),
+                path_string(r"C:\Users\tester\.tmux.conf"),
+                path_string(r"C:\Users\tester\AppData\Roaming\tmux\tmux.conf"),
+            ]
+        );
+        assert!(
+            paths.iter().all(|path| !path.ends_with("rmux.conf")),
+            "tmux fallback paths must not include rmux config files: {paths:?}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_nul_config_path_is_empty() {
+        let inputs = source_inputs_for_path("NUL", None, false, None, SourceReadPolicy::Strict)
+            .expect("NUL should behave like an empty config file");
+        assert_eq!(inputs.len(), 1);
+        assert!(inputs[0].contents.is_empty());
+
+        let inputs = source_inputs_for_path("nul", None, false, None, SourceReadPolicy::Strict)
             .expect("nul should be case-insensitive");
-        assert!(inputs.is_empty());
+        assert_eq!(inputs.len(), 1);
+        assert!(inputs[0].contents.is_empty());
     }
 
     #[cfg(windows)]

@@ -12,10 +12,16 @@ pub const CAPABILITY_HANDSHAKE: &str = "protocol.capabilities";
 pub const CAPABILITY_FRAMED_ERRORS: &str = "protocol.framed_errors";
 /// Stable feature id for `attach-session` framed-to-raw stream upgrades.
 pub const CAPABILITY_ATTACH_STREAM: &str = "stream.attach";
+/// Stable feature id for attach-stream resize messages that carry pixel geometry.
+pub const CAPABILITY_ATTACH_RESIZE_GEOMETRY: &str = "stream.attach.resize_geometry";
 /// Stable feature id for control-mode framed-to-raw stream upgrades.
 pub const CAPABILITY_CONTROL_STREAM: &str = "stream.control";
 /// Stable feature id for daemon shutdown over detached RPC.
 pub const CAPABILITY_DAEMON_SHUTDOWN: &str = "daemon.shutdown";
+/// Stable feature id for daemon version and activity metadata.
+pub const CAPABILITY_DAEMON_STATUS: &str = "daemon.status";
+/// Stable feature id for safe idle-daemon shutdown during client upgrades.
+pub const CAPABILITY_DAEMON_SHUTDOWN_IF_IDLE: &str = "daemon.shutdown_if_idle";
 /// Stable feature id for daemon-backed SDK waits and cancellation.
 pub const CAPABILITY_SDK_WAITS: &str = "sdk.waits";
 /// Stable feature id for SDK pane operations that target stable pane ids.
@@ -33,8 +39,11 @@ pub const SUPPORTED_CAPABILITIES: &[&str] = &[
     CAPABILITY_HANDSHAKE,
     CAPABILITY_FRAMED_ERRORS,
     CAPABILITY_ATTACH_STREAM,
+    CAPABILITY_ATTACH_RESIZE_GEOMETRY,
     CAPABILITY_CONTROL_STREAM,
     CAPABILITY_DAEMON_SHUTDOWN,
+    CAPABILITY_DAEMON_STATUS,
+    CAPABILITY_DAEMON_SHUTDOWN_IF_IDLE,
     CAPABILITY_SDK_WAITS,
     CAPABILITY_SDK_PANE_BY_ID,
     CAPABILITY_SDK_PANE_BROADCAST,

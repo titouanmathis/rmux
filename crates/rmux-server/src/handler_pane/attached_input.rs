@@ -20,8 +20,12 @@ use crate::pane_io::{AttachControl, OverlayFrame};
 
 #[path = "attached_input/bracketed_paste.rs"]
 mod bracketed_paste;
+#[path = "attached_input/kitty_graphics.rs"]
+mod kitty_graphics;
 #[path = "attached_input/live.rs"]
 mod live;
+#[path = "attached_input/terminal_response.rs"]
+mod terminal_response;
 
 const MAX_RETAINED_ATTACHED_CONTROL_INPUT: usize = DEFAULT_MAX_FRAME_LENGTH;
 
@@ -214,6 +218,12 @@ impl RequestHandler {
                         )
                         .await?;
                         offset += size;
+                        if self.prompt_active(attach_pid).await
+                            || !self.mode_tree_active(attach_pid).await
+                        {
+                            break;
+                        }
+                        continue;
                     }
                     ExtendedKeyDecode::Partial => {
                         pending_input.drain(..offset);
@@ -223,15 +233,8 @@ impl RequestHandler {
                         )?;
                         return Ok(());
                     }
-                    ExtendedKeyDecode::Invalid => {
-                        offset += 1;
-                    }
+                    ExtendedKeyDecode::Invalid => {}
                 }
-                if self.prompt_active(attach_pid).await || !self.mode_tree_active(attach_pid).await
-                {
-                    break;
-                }
-                continue;
             }
 
             match decode_attached_key(slice, backspace) {
@@ -377,6 +380,21 @@ impl RequestHandler {
         write_bytes_to_target_io(write, bytes.to_vec())
             .await
             .map_err(io_other)
+    }
+
+    pub(crate) async fn flush_attached_pending_escape_input(
+        &self,
+        attach_pid: u32,
+        pending_input: &mut Vec<u8>,
+    ) -> io::Result<bool> {
+        if pending_input.is_empty() {
+            return Ok(false);
+        }
+
+        let bytes = std::mem::take(pending_input);
+        self.write_attached_bytes(attach_pid, &bytes).await?;
+        pending_input.clear();
+        Ok(true)
     }
 
     async fn record_attached_submitted_text(

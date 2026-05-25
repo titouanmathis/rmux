@@ -3,6 +3,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{ProcessCommand, SessionName, TerminalSize};
 
+use super::compat::{compat_next_element, required_next};
+
 /// Request payload for `new-session`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NewSessionRequest {
@@ -63,6 +65,9 @@ pub struct NewSessionExtRequest {
     /// Explicit process launch mode for the initial pane.
     #[serde(default)]
     pub process_command: Option<ProcessCommand>,
+    /// Full invoking client environment in `NAME=VALUE` form.
+    #[serde(default)]
+    pub client_environment: Option<Vec<String>>,
 }
 
 impl<'de> Deserialize<'de> for NewSessionExtRequest {
@@ -88,6 +93,7 @@ impl<'de> Deserialize<'de> for NewSessionExtRequest {
                 "print_format",
                 "command",
                 "process_command",
+                "client_environment",
             ],
             NewSessionExtRequestVisitor,
         )
@@ -122,6 +128,7 @@ impl<'de> Visitor<'de> for NewSessionExtRequestVisitor {
         let print_format = required_next(&mut seq, 12, &self)?;
         let command = required_next(&mut seq, 13, &self)?;
         let process_command = compat_next_element(&mut seq)?;
+        let client_environment = compat_next_element(&mut seq)?;
 
         Ok(NewSessionExtRequest {
             session_name,
@@ -139,6 +146,7 @@ impl<'de> Visitor<'de> for NewSessionExtRequestVisitor {
             print_format,
             command,
             process_command,
+            client_environment,
         })
     }
 
@@ -161,6 +169,7 @@ impl<'de> Visitor<'de> for NewSessionExtRequestVisitor {
         let mut print_format = None;
         let mut command = None;
         let mut process_command = None;
+        let mut client_environment = None;
 
         while let Some(key) = map.next_key::<String>()? {
             match key.as_str() {
@@ -179,6 +188,7 @@ impl<'de> Visitor<'de> for NewSessionExtRequestVisitor {
                 "print_format" => print_format = Some(map.next_value()?),
                 "command" => command = Some(map.next_value()?),
                 "process_command" => process_command = Some(map.next_value()?),
+                "client_environment" => client_environment = Some(map.next_value()?),
                 _ => {
                     let _: de::IgnoredAny = map.next_value()?;
                 }
@@ -206,36 +216,9 @@ impl<'de> Visitor<'de> for NewSessionExtRequestVisitor {
             print_format: print_format.ok_or_else(|| de::Error::missing_field("print_format"))?,
             command: command.ok_or_else(|| de::Error::missing_field("command"))?,
             process_command: process_command.unwrap_or_default(),
+            client_environment: client_environment.unwrap_or_default(),
         })
     }
-}
-
-fn required_next<'de, A, T, V>(seq: &mut A, index: usize, visitor: &V) -> Result<T, A::Error>
-where
-    A: SeqAccess<'de>,
-    T: Deserialize<'de>,
-    V: Visitor<'de>,
-{
-    seq.next_element()?
-        .ok_or_else(|| de::Error::invalid_length(index, visitor))
-}
-
-fn compat_next_element<'de, A, T>(seq: &mut A) -> Result<T, A::Error>
-where
-    A: SeqAccess<'de>,
-    T: Deserialize<'de> + Default,
-{
-    match seq.next_element::<T>() {
-        Ok(Some(value)) => Ok(value),
-        Ok(None) => Ok(T::default()),
-        Err(error) if is_truncated_compat_sequence(&error) => Ok(T::default()),
-        Err(error) => Err(error),
-    }
-}
-
-fn is_truncated_compat_sequence(error: &impl std::fmt::Display) -> bool {
-    let message = error.to_string();
-    message.contains("UnexpectedEof") || message.contains("unexpected end of file")
 }
 
 /// Request payload for `has-session`.

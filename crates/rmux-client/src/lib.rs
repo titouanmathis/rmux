@@ -18,7 +18,11 @@ pub(crate) mod commands;
 pub mod connection;
 pub mod control;
 pub mod nested;
+pub(crate) mod shell_quote;
+pub(crate) mod upgrade;
 
+#[cfg(unix)]
+pub use attach::attach_terminal_with_initial_bytes_and_resize_geometry;
 pub use attach::{
     attach_terminal, attach_terminal_with_initial_bytes, attach_with_terminal, drive_attach_stream,
     AttachError, RawTerminal,

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::identity::SessionName;
 use crate::{PaneId, RmuxError};
-pub use rmux_types::TerminalSize;
+pub use rmux_types::{TerminalGeometry, TerminalPixels, TerminalSize};
 
 #[path = "types/hooks.rs"]
 mod hooks;
@@ -475,6 +475,13 @@ pub enum ResizePaneAdjustment {
     },
     /// Sets the absolute pane height in rows.
     AbsoluteHeight {
+        /// The requested pane height in rows.
+        rows: u16,
+    },
+    /// Sets the absolute pane width and height.
+    AbsoluteSize {
+        /// The requested pane width in columns.
+        columns: u16,
         /// The requested pane height in rows.
         rows: u16,
     },

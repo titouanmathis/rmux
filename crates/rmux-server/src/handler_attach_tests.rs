@@ -202,6 +202,7 @@ async fn create_session_with_command(
             print_format: None,
             command: Some(command),
             process_command: None,
+            client_environment: None,
         }))
         .await;
     assert!(

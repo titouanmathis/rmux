@@ -98,6 +98,18 @@ impl RequestHandler {
             .await
         {
             Ok(client) => client,
+            Err(error)
+                if request.target_client.is_none()
+                    && matches!(
+                        &error,
+                        RmuxError::Server(message)
+                            if message == "switch-client requires an attached client"
+                    ) =>
+            {
+                return Response::Error(ErrorResponse {
+                    error: RmuxError::Message("no current client".to_owned()),
+                });
+            }
             Err(error) => return Response::Error(ErrorResponse { error }),
         };
         if switch_target_selector_count(&request) > 1 {
@@ -265,7 +277,7 @@ impl RequestHandler {
 
         match client {
             ManagedClient::Attach(attach_pid) => {
-                let Some((terminal_context, client_size)) = self
+                let Some((terminal_context, client_size, client_pixels)) = self
                     .terminal_context_and_size_for_attached_client(attach_pid)
                     .await
                 else {
@@ -274,7 +286,13 @@ impl RequestHandler {
                     });
                 };
                 if let Err(error) = self
-                    .resize_session_for_attach_client(&session_name, Some(client_size))
+                    .resize_session_geometry_for_attach_client(
+                        &session_name,
+                        Some(rmux_proto::TerminalGeometry {
+                            size: client_size,
+                            pixels: client_pixels,
+                        }),
+                    )
                     .await
                 {
                     return Response::Error(ErrorResponse { error });

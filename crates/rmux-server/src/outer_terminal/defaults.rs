@@ -31,6 +31,7 @@ pub(super) const DEFAULT_MINTTY_FEATURES: &[&str] = &[
     "margins",
     "overline",
     "usstyle",
+    "sixel",
 ];
 pub(super) const DEFAULT_TMUX_FEATURES: &[&str] = &[
     "256",
@@ -83,6 +84,39 @@ pub(super) const DEFAULT_FOOT_FEATURES: &[&str] = &[
     "title",
     "cstyle",
     "extkeys",
+    "sixel",
+];
+pub(super) const DEFAULT_MLTERM_FEATURES: &[&str] = &[
+    "256",
+    "RGB",
+    "bpaste",
+    "clipboard",
+    "mouse",
+    "strikethrough",
+    "title",
+    "cstyle",
+    "extkeys",
+    "sixel",
+];
+pub(super) const DEFAULT_KITTY_FEATURES: &[&str] = &[
+    "256",
+    "RGB",
+    "bpaste",
+    "clipboard",
+    "mouse",
+    "strikethrough",
+    "title",
+    "ccolour",
+    "cstyle",
+    "extkeys",
+    "focus",
+    "margins",
+    "overline",
+    "usstyle",
+    "sync",
+    "osc7",
+    "hyperlinks",
+    "kitty-graphics",
 ];
 pub(super) const DEFAULT_XTERM_FEATURES: &[&str] = &[
     "256",

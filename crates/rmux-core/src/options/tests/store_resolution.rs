@@ -16,7 +16,7 @@ fn option_store_starts_without_explicit_overrides_but_resolves_defaults() {
     );
     assert_eq!(
         store.resolve_for_window(&session_name("alpha"), 0, OptionName::AutomaticRenameFormat),
-        Some("#{?pane_in_mode,[rmux],#{pane_current_command}}#{?pane_dead,[dead],}")
+        Some("#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}")
     );
 }
 
@@ -148,6 +148,26 @@ fn append_to_non_appendable_options_is_rejected_without_creating_overrides() {
         rmux_proto::RmuxError::InvalidSetOption("status is not an array option".to_owned())
     );
     assert!(store.is_empty());
+}
+
+#[test]
+fn allow_passthrough_preserves_all_for_tmux_compatibility() {
+    let mut store = OptionStore::new();
+    let alpha = session_name("alpha");
+
+    store
+        .set(
+            ScopeSelector::Global,
+            OptionName::AllowPassthrough,
+            "all".to_owned(),
+            SetOptionMode::Replace,
+        )
+        .expect("tmux-compatible all value is accepted");
+
+    assert_eq!(
+        store.resolve_for_window(&alpha, 0, OptionName::AllowPassthrough),
+        Some("all")
+    );
 }
 
 #[test]

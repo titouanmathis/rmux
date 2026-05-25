@@ -2,13 +2,19 @@
 
 use crate::grid::{Grid, GridCell, GridCellFlags, GridLine};
 use crate::hyperlinks::Hyperlinks;
-use crate::input::mode;
-use crate::input::{CellState, SavedState, ScreenWriter, COLOUR_DEFAULT};
+use crate::input::{mode, CellState, SavedState, ScreenWriter, COLOUR_DEFAULT};
+use crate::terminal_passthrough::{TerminalPassthrough, MAX_TERMINAL_PASSTHROUGH_PAYLOAD_BYTES};
 use crate::utf8::{combine_char as utf8_combine_char, CombineResult, Utf8Config};
 use rmux_proto::TerminalSize;
 
+#[path = "screen/acs.rs"]
+mod acs;
 #[path = "screen/capture.rs"]
 mod capture;
+#[path = "screen/cell_nav.rs"]
+mod cell_nav;
+#[path = "screen/history_bytes.rs"]
+mod history_bytes;
 #[path = "screen/selection.rs"]
 mod selection;
 #[path = "screen/style_overlay.rs"]
@@ -19,6 +25,8 @@ mod view;
 mod writer;
 
 pub use view::{ScreenCellView, ScreenLineView};
+
+pub(crate) const MAX_TERMINAL_PASSTHROUGH_EVENTS: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SavedGrid {
@@ -51,6 +59,8 @@ pub struct Screen {
     hyperlinks: Hyperlinks,
     active_hyperlink: u32,
     bell_count: u64,
+    terminal_passthrough: Vec<TerminalPassthrough>,
+    dropped_terminal_passthrough_count: u64,
     utf8_config: Utf8Config,
 }
 
@@ -81,6 +91,8 @@ impl Screen {
             hyperlinks: Hyperlinks::new(),
             active_hyperlink: 0,
             bell_count: 0,
+            terminal_passthrough: Vec::new(),
+            dropped_terminal_passthrough_count: 0,
             utf8_config: Utf8Config::default(),
         };
         screen.reset_tabs();
@@ -228,6 +240,40 @@ impl Screen {
         let bell_count = self.bell_count;
         self.bell_count = 0;
         bell_count
+    }
+
+    /// Drains terminal passthrough events observed since the last drain.
+    pub fn take_terminal_passthrough(&mut self) -> Vec<TerminalPassthrough> {
+        std::mem::take(&mut self.terminal_passthrough)
+    }
+
+    /// Drains the count of terminal passthrough events dropped by safety limits.
+    pub fn take_terminal_passthrough_dropped_count(&mut self) -> u64 {
+        let dropped = self.dropped_terminal_passthrough_count;
+        self.dropped_terminal_passthrough_count = 0;
+        dropped
+    }
+
+    fn push_terminal_passthrough(&mut self, passthrough: TerminalPassthrough) {
+        if passthrough.payload().len() > MAX_TERMINAL_PASSTHROUGH_PAYLOAD_BYTES {
+            self.dropped_terminal_passthrough_count =
+                self.dropped_terminal_passthrough_count.saturating_add(1);
+            return;
+        }
+
+        let overflow = self
+            .terminal_passthrough
+            .len()
+            .saturating_add(1)
+            .saturating_sub(MAX_TERMINAL_PASSTHROUGH_EVENTS);
+        if overflow > 0 {
+            self.terminal_passthrough.drain(..overflow);
+            self.dropped_terminal_passthrough_count = self
+                .dropped_terminal_passthrough_count
+                .saturating_add(overflow as u64);
+        }
+
+        self.terminal_passthrough.push(passthrough);
     }
 
     /// Returns the stored OSC 8 URI for a hyperlink inner ID.
@@ -384,7 +430,7 @@ impl Screen {
             return;
         }
 
-        let ch = if acs { translate_acs(ch) } else { ch };
+        let ch = if acs { acs::translate_acs(ch) } else { ch };
         let width = u32::from(self.utf8_config.width(ch));
         if self.combine_char(ch) {
             return;
@@ -529,53 +575,6 @@ impl Screen {
             }
         }
         (internal_id, uri.to_owned())
-    }
-
-    fn previous_cell_x(&self, y: u32, x: u32) -> u32 {
-        let Some(candidate) = x.checked_sub(1) else {
-            return 0;
-        };
-        let Some(line) = self.grid.visible_line(y) else {
-            return candidate;
-        };
-        if line.is_padding_cell(candidate) {
-            return line.owning_cell_x(candidate).unwrap_or(candidate);
-        }
-        candidate
-    }
-
-    fn next_cell_x(&self, y: u32, x: u32) -> u32 {
-        let max_x = self.grid.sx().saturating_sub(1);
-        if x >= max_x {
-            return max_x;
-        }
-
-        let Some(line) = self.grid.visible_line(y) else {
-            return x.saturating_add(1).min(max_x);
-        };
-        let owner_x = line.owning_cell_x(x).unwrap_or(x);
-        let width = line
-            .cell(owner_x)
-            .map_or(1, |cell| u32::from(cell.width().max(1)));
-
-        owner_x.saturating_add(width).min(max_x)
-    }
-}
-
-fn translate_acs(ch: char) -> char {
-    match ch {
-        'j' => '┘',
-        'k' => '┐',
-        'l' => '┌',
-        'm' => '└',
-        'n' => '┼',
-        'q' => '─',
-        't' => '├',
-        'u' => '┤',
-        'v' => '┴',
-        'w' => '┬',
-        'x' => '│',
-        _ => ch,
     }
 }
 

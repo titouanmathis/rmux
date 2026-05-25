@@ -11,6 +11,7 @@ mod commands;
 mod csi_helpers;
 mod dispatch;
 mod params;
+mod passthrough;
 mod sgr;
 mod states;
 mod tables;
@@ -29,6 +30,8 @@ pub use states::InputState;
 
 use params::ParamList;
 use states::Transition;
+
+use crate::terminal_passthrough::MAX_TERMINAL_PASSTHROUGH_PAYLOAD_BYTES;
 
 /// Maximum number of parameters in a CSI/DCS sequence.
 const PARAM_LIST_MAX: usize = 24;
@@ -159,6 +162,8 @@ pub struct InputParser {
 
     /// Reply buffer: replies to be sent back to the PTY.
     reply_buf: Vec<u8>,
+    /// Dropped terminal passthrough events caused by parser string limits.
+    terminal_passthrough_dropped_count: u64,
 }
 
 impl InputParser {
@@ -186,6 +191,7 @@ impl InputParser {
             since_ground: Vec::new(),
             ground_timer_active: false,
             reply_buf: Vec::new(),
+            terminal_passthrough_dropped_count: 0,
         }
     }
 
@@ -198,6 +204,13 @@ impl InputParser {
     /// Returns and drains accumulated reply bytes.
     pub fn take_replies(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.reply_buf)
+    }
+
+    /// Returns and drains terminal passthrough drops caused by parser limits.
+    pub(crate) fn take_terminal_passthrough_dropped_count(&mut self) -> u64 {
+        let dropped = self.terminal_passthrough_dropped_count;
+        self.terminal_passthrough_dropped_count = 0;
+        dropped
     }
 
     /// Returns and drains accumulated since-ground bytes.
@@ -393,6 +406,10 @@ impl InputParser {
         if self.flags & INPUT_DISCARD != 0 {
             return;
         }
+        if passthrough::is_kitty_graphics_apc(&self.input_buf) {
+            writer.apc_passthrough(&self.input_buf);
+            return;
+        }
         let buf = String::from_utf8_lossy(&self.input_buf).into_owned();
         writer.set_title(&buf);
     }
@@ -454,12 +471,31 @@ impl InputParser {
     }
 
     fn handle_input(&mut self) -> bool {
-        if self.input_buf.len() + 1 >= INPUT_BUF_MAX {
+        let input_limit = self.input_buffer_limit();
+        if self.input_buf.len() + 1 >= input_limit {
+            if self.flags & INPUT_DISCARD == 0 && self.is_terminal_passthrough_string() {
+                self.terminal_passthrough_dropped_count =
+                    self.terminal_passthrough_dropped_count.saturating_add(1);
+            }
             self.flags |= INPUT_DISCARD;
         } else {
             self.input_buf.push(self.ch);
         }
         false
+    }
+
+    fn input_buffer_limit(&self) -> usize {
+        if self.is_terminal_passthrough_string() {
+            return MAX_TERMINAL_PASSTHROUGH_PAYLOAD_BYTES;
+        }
+        INPUT_BUF_MAX
+    }
+
+    fn is_terminal_passthrough_string(&self) -> bool {
+        (self.state == InputState::ApcString && passthrough::is_kitty_graphics_apc(&self.input_buf))
+            || (self.state == InputState::DcsHandler
+                && self.interm_len == 0
+                && self.input_buf.first() == Some(&b'q'))
     }
 
     fn handle_end_bel(&mut self) -> bool {

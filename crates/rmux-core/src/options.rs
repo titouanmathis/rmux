@@ -30,6 +30,7 @@ pub use registry::{
     OptionQuery,
 };
 use registry::{option_metadata, OptionChangeMask, OptionValueType};
+pub use scope::default_global_scope_for_option_name;
 use storage::{OptionEntry, OptionNode};
 
 /// Option rendering mode for `show-options`.
@@ -37,6 +38,8 @@ use storage::{OptionEntry, OptionNode};
 pub enum ShowOptionsMode {
     /// Render the fully resolved view for each known option.
     Resolved,
+    /// Render the resolved view and mark inherited values with `*`, matching `show-options -A`.
+    ResolvedWithInheritanceMarkers,
     /// Render only entries explicitly present in the selected tree.
     Explicit,
 }

@@ -9,10 +9,9 @@ use rmux_core::LifecycleEvent;
 use rmux_proto::{
     BreakPaneRequest, DisplayPanesRequest, KillPaneRequest, ListPanesRequest, ListWindowsRequest,
     MovePaneRequest, NewSessionExtRequest, NewSessionRequest, OptionName, PaneSnapshotRequest,
-    PaneTarget, PipePaneRequest, RenameWindowRequest, Request, RespawnPaneRequest, ScopeSelector,
-    SelectPaneRequest, SendKeysRequest, SessionName, SetOptionMode, SetOptionRequest,
-    SplitDirection, SplitWindowExtRequest, SplitWindowRequest, SplitWindowTarget, TerminalSize,
-    WindowTarget,
+    PaneTarget, PipePaneRequest, ProcessCommand, RenameWindowRequest, Request, RespawnPaneRequest,
+    ScopeSelector, SelectPaneRequest, SessionName, SetOptionMode, SetOptionRequest, SplitDirection,
+    SplitWindowExtRequest, SplitWindowRequest, SplitWindowTarget, TerminalSize, WindowTarget,
 };
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout};
@@ -37,31 +36,8 @@ fn shell_quote(path: &Path) -> String {
     crate::test_shell::sh_quote_path(path)
 }
 
-#[cfg(windows)]
-fn pipe_to_file_command(path: &Path) -> String {
-    crate::test_shell::powershell_encoded_command(&format!(
-        "$out=[System.IO.File]::Open({}, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite); try {{ $buf=New-Object byte[] 4096; $inputStream=[Console]::OpenStandardInput(); while (($n=$inputStream.Read($buf,0,$buf.Length)) -gt 0) {{ $out.Write($buf,0,$n); $out.Flush() }} }} finally {{ $out.Dispose() }}",
-        crate::test_shell::powershell_quote_path(path)
-    ))
-}
-
-#[cfg(unix)]
-fn pipe_to_file_command(path: &Path) -> String {
-    format!("cat > {}", shell_quote(path))
-}
-
 fn pipe_discard_command() -> String {
     crate::test_shell::stdin_discard_command()
-}
-
-#[cfg(unix)]
-fn pane_print_command(text: &str) -> String {
-    format!("printf '{}\\n'", text.replace('\'', r"'\''"))
-}
-
-#[cfg(windows)]
-fn pane_print_command(text: &str) -> String {
-    format!("echo {text}")
 }
 
 #[cfg(unix)]
@@ -76,6 +52,19 @@ fn respawn_probe_command(output: &Path) -> String {
 fn respawn_probe_command(output: &Path) -> String {
     crate::test_shell::powershell_encoded_command(&format!(
         "[System.IO.File]::WriteAllText({}, ((Get-Location).Path + ':' + $env:RMUX_RESPAWN))",
+        crate::test_shell::powershell_quote_path(output)
+    ))
+}
+
+#[cfg(unix)]
+fn cwd_probe_command(output: &Path) -> String {
+    format!("printf '%s' \"$(pwd)\" > {}", shell_quote(output))
+}
+
+#[cfg(windows)]
+fn cwd_probe_command(output: &Path) -> String {
+    crate::test_shell::powershell_encoded_command(&format!(
+        "[System.IO.File]::WriteAllText({}, (Get-Location).Path)",
         crate::test_shell::powershell_quote_path(output)
     ))
 }
@@ -127,29 +116,6 @@ async fn wait_for_file_contents(path: &Path, expected: &str) {
             ),
             Err(error) => panic!(
                 "timed out waiting for {} to exist with {:?}: {error}",
-                path.display(),
-                expected
-            ),
-        }
-    }
-}
-
-async fn wait_for_file_contains(path: &Path, expected: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        match fs::read_to_string(path) {
-            Ok(contents) if contents.contains(expected) => return,
-            Ok(_) | Err(_) if tokio::time::Instant::now() < deadline => {
-                sleep(Duration::from_millis(25)).await;
-            }
-            Ok(contents) => panic!(
-                "timed out waiting for {} to contain {:?}, got {:?}",
-                path.display(),
-                expected,
-                contents
-            ),
-            Err(error) => panic!(
-                "timed out waiting for {} to exist containing {:?}: {error}",
                 path.display(),
                 expected
             ),
@@ -243,6 +209,7 @@ async fn sticky_lifecycle_state_is_id_keyed_and_redacts_spawn_env() {
             print_format: None,
             command: Some(vec![initial_command.clone()]),
             process_command: None,
+            client_environment: None,
         }))
         .await;
     assert!(matches!(created, rmux_proto::Response::NewSession(_)));
@@ -482,6 +449,71 @@ async fn sticky_lifecycle_state_is_id_keyed_and_redacts_spawn_env() {
 }
 
 #[tokio::test]
+async fn split_window_ext_applies_start_directory_to_spawned_process() {
+    let handler = RequestHandler::new();
+    let alpha = session_name("split-cwd");
+    let cwd = unique_temp_path("split-cwd");
+    let output = unique_temp_path("split-cwd-output");
+    fs::create_dir_all(&cwd).expect("split cwd");
+    create_session(&handler, &alpha).await;
+
+    let response = handler
+        .handle(Request::SplitWindowExt(SplitWindowExtRequest {
+            target: SplitWindowTarget::Session(alpha.clone()),
+            direction: SplitDirection::Vertical,
+            before: false,
+            environment: None,
+            command: Some(vec![cwd_probe_command(&output)]),
+            process_command: None,
+            start_directory: Some(cwd.clone()),
+            keep_alive_on_exit: None,
+        }))
+        .await;
+    let _split_target = match response {
+        rmux_proto::Response::SplitWindow(response) => response.pane,
+        response => panic!("expected split-window success, got {response:?}"),
+    };
+
+    let expected_cwd = expected_spawn_cwd(&cwd);
+    wait_for_file_contents(&output, &expected_cwd).await;
+
+    let _ = fs::remove_file(output);
+    let _ = fs::remove_dir_all(cwd);
+}
+
+#[tokio::test]
+async fn split_window_rolls_back_session_when_spawn_fails() {
+    let handler = RequestHandler::new();
+    let alpha = session_name("split-spawn-fails");
+    create_session(&handler, &alpha).await;
+    let missing_program = unique_temp_path("missing-program");
+
+    let response = handler
+        .handle(Request::SplitWindowExt(SplitWindowExtRequest {
+            target: SplitWindowTarget::Session(alpha.clone()),
+            direction: SplitDirection::Vertical,
+            before: false,
+            environment: None,
+            command: None,
+            process_command: Some(ProcessCommand::Argv(vec![missing_program
+                .to_string_lossy()
+                .into_owned()])),
+            start_directory: None,
+            keep_alive_on_exit: None,
+        }))
+        .await;
+
+    assert!(
+        matches!(&response, rmux_proto::Response::Error(error) if error.error.to_string().contains("failed to spawn pane shell")),
+        "expected spawn failure, got {response:?}"
+    );
+
+    let state = handler.state.lock().await;
+    let session = state.sessions.session(&alpha).expect("session exists");
+    assert_eq!(session.window_at(0).expect("window exists").pane_count(), 1);
+}
+
+#[tokio::test]
 async fn pane_output_sequence_advances_when_transcript_changes() {
     let handler = RequestHandler::new();
     let alpha = session_name("sequence");
@@ -502,6 +534,7 @@ async fn pane_output_sequence_advances_when_transcript_changes() {
             print_format: None,
             command: Some(vec![pipe_discard_command()]),
             process_command: None,
+            client_environment: None,
         }))
         .await;
     assert!(matches!(created, rmux_proto::Response::NewSession(_)));
@@ -589,6 +622,7 @@ async fn move_pane_routes_through_join_semantics() {
                     start_directory: None,
                     command: None,
                     socket_path: Path::new("/tmp/rmux-test.sock"),
+                    spawn_environment: None,
                     environment_overrides: None,
                     pane_alert_callback: None,
                     pane_exit_callback: None,
@@ -666,63 +700,6 @@ async fn break_pane_print_target_uses_custom_format() {
     };
     let output = success.command_output().expect("break-pane -P output");
     assert_eq!(output.stdout(), b"1.0\n");
-}
-
-#[tokio::test]
-async fn pipe_pane_once_keeps_the_existing_pipe() {
-    let handler = RequestHandler::new();
-    let alpha = session_name("alpha");
-    let first_output = unique_temp_path("pipe-once-first");
-    let second_output = unique_temp_path("pipe-once-second");
-    create_session(&handler, &alpha).await;
-
-    let first = handler
-        .handle(Request::PipePane(PipePaneRequest {
-            target: PaneTarget::with_window(alpha.clone(), 0, 0),
-            stdin: false,
-            stdout: true,
-            once: false,
-            command: Some(pipe_to_file_command(&first_output)),
-        }))
-        .await;
-    assert!(matches!(first, rmux_proto::Response::PipePane(_)));
-
-    let second = handler
-        .handle(Request::PipePane(PipePaneRequest {
-            target: PaneTarget::with_window(alpha.clone(), 0, 0),
-            stdin: false,
-            stdout: true,
-            once: true,
-            command: Some(pipe_to_file_command(&second_output)),
-        }))
-        .await;
-    assert!(matches!(second, rmux_proto::Response::PipePane(_)));
-
-    let sent = handler
-        .handle(Request::SendKeys(SendKeysRequest {
-            target: PaneTarget::with_window(alpha.clone(), 0, 0),
-            keys: vec![pane_print_command("pipe-once-test"), "Enter".to_owned()],
-        }))
-        .await;
-    assert!(matches!(sent, rmux_proto::Response::SendKeys(_)));
-
-    wait_for_file_contains(&first_output, "pipe-once-test").await;
-    sleep(Duration::from_millis(150)).await;
-    assert!(
-        !second_output.exists(),
-        "toggle-once should not replace the existing pipe"
-    );
-
-    let _ = handler
-        .handle(Request::PipePane(PipePaneRequest {
-            target: PaneTarget::with_window(alpha, 0, 0),
-            stdin: false,
-            stdout: true,
-            once: false,
-            command: None,
-        }))
-        .await;
-    let _ = fs::remove_file(first_output);
 }
 
 #[tokio::test]
@@ -1626,6 +1603,7 @@ async fn pane_snapshot_returns_live_screen_built_via_terminal_parser() {
             print_format: None,
             command: Some(vec![pipe_discard_command()]),
             process_command: None,
+            client_environment: None,
         }))
         .await;
     assert!(matches!(created, rmux_proto::Response::NewSession(_)));
@@ -1755,6 +1733,7 @@ async fn pane_snapshot_folds_invalid_utf8_through_parser_not_raw_bytes() {
             print_format: None,
             command: Some(vec![pipe_discard_command()]),
             process_command: None,
+            client_environment: None,
         }))
         .await;
     assert!(matches!(created, rmux_proto::Response::NewSession(_)));
@@ -1840,6 +1819,7 @@ async fn pane_snapshot_revision_changes_after_clear_history() {
             print_format: None,
             command: Some(vec![pipe_discard_command()]),
             process_command: None,
+            client_environment: None,
         }))
         .await;
     assert!(matches!(created, rmux_proto::Response::NewSession(_)));

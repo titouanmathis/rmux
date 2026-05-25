@@ -164,9 +164,10 @@ impl OuterTerminal {
         if let Some(sequence) = &self.enable_bpaste {
             bytes.extend_from_slice(sequence.as_bytes());
         }
-        if let Some(sequence) = self.mouse_sequence().as_deref() {
-            bytes.extend_from_slice(sequence.as_bytes());
-        }
+        // Send focus and extended-keys BEFORE mouse so that mouse enable is
+        // applied last. This matches tmux's tty_start_sequence() order and
+        // avoids terminals (e.g. Termius) that reset mouse state when they
+        // receive an unknown CSI sequence such as the extkeys \x1b[>4;2m.
         if self.focus_events_enabled {
             if let Some(sequence) = &self.enable_focus {
                 bytes.extend_from_slice(sequence.as_bytes());
@@ -181,6 +182,10 @@ impl OuterTerminal {
             if let Some(sequence) = &self.enable_margins {
                 bytes.extend_from_slice(sequence.as_bytes());
             }
+        }
+        let mouse_seq = self.mouse_sequence();
+        if let Some(sequence) = mouse_seq.as_deref() {
+            bytes.extend_from_slice(sequence.as_bytes());
         }
         bytes
     }
@@ -366,20 +371,19 @@ impl OuterTerminal {
     }
 
     fn mouse_sequence(&self) -> Option<String> {
-        // Match tmux's defensive mouse-mode reset before enabling reporting.
-        // Some terminals keep partially enabled mouse modes across alternate-screen
-        // transitions; clearing every supported protocol first prevents wheel input
-        // from being translated to cursor keys instead of mouse events.
-        (self.supports_mouse && self.mouse_reporting_enabled).then_some(
-            "\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\
-             \x1b[?1006h\x1b[?1002h\x1b[?1000h"
-                .to_owned(),
-        )
+        // Match tmux's tty_mouse_mode() exactly:
+        //   ?1006h  SGR extended coordinates
+        //   ?1000h  normal button tracking
+        //   ?1002h  button-event tracking (required by Termius to send scroll
+        //           wheel events as SGR mouse events instead of cursor keys)
+        (self.supports_mouse && self.mouse_reporting_enabled)
+            .then_some("\x1b[?1006h\x1b[?1000h\x1b[?1002h".to_owned())
     }
 
     fn disable_mouse_sequence(&self) -> Option<String> {
+        // Disable in reverse order of how they were enabled.
         self.supports_mouse
-            .then_some("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l".to_owned())
+            .then_some("\x1b[?1002l\x1b[?1000l\x1b[?1006l".to_owned())
     }
 
     fn extkeys_sequence(&self) -> Option<String> {
